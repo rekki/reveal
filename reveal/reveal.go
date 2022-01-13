@@ -1,17 +1,17 @@
 package reveal
 
-// TODO: follow embedded types
 // TODO: support path parameters
-// TODO: infer input types
-// TODO: infer input parameters
-// TODO: infer output types
-// TODO: add link to source code
+// TODO: support query parameters
+// TODO: support json input
+// TODO: support json output
+// TODO: add link to source code in endpoint description
 
 import (
 	"context"
 	"fmt"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"net/http"
 	"strconv"
 
@@ -22,9 +22,10 @@ import (
 func Reveal(ctx context.Context, rootPkg string) (*openapi3.T, error) {
 	cfg := &packages.Config{
 		Context: ctx,
+		Dir:     rootPkg,
 		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedExportsFile | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedModule,
 	}
-	pkgs, err := packages.Load(cfg, "pattern=./"+rootPkg)
+	pkgs, err := packages.Load(cfg, "pattern="+rootPkg)
 	if err != nil {
 		return nil, err
 	}
@@ -34,9 +35,6 @@ func Reveal(ctx context.Context, rootPkg string) (*openapi3.T, error) {
 		Info: &openapi3.Info{
 			Title:   "service-xxx",
 			Version: "git hash",
-		},
-		Servers: openapi3.Servers{
-			&openapi3.Server{URL: "https://rekki.com"},
 		},
 		Paths: openapi3.Paths{},
 	}
@@ -84,10 +82,10 @@ func Reveal(ctx context.Context, rootPkg string) (*openapi3.T, error) {
 func intoMethodPath(callexpr *ast.CallExpr, pkg *packages.Package) (string, string, bool) {
 	if selector, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
 		if x, ok := selector.X.(*ast.Ident); ok {
-			if info, ok := pkg.TypesInfo.Uses[x]; ok && info.Type().String() == "*github.com/gin-gonic/gin.Engine" {
+			if isGinEngine(pkg.TypesInfo.Uses[x].Type()) {
 				if len(callexpr.Args) > 1 {
 					if path, ok := callexpr.Args[0].(*ast.BasicLit); ok && path.Kind == token.STRING {
-						if p, err := strconv.Unquote(path.Value); err != nil {
+						if p, err := strconv.Unquote(path.Value); err == nil {
 							switch selector.Sel.Name {
 							case "POST":
 								return http.MethodPost, p, true
@@ -118,4 +116,32 @@ func intoOperation(callexpr *ast.CallExpr) *openapi3.Operation {
 	return &openapi3.Operation{
 		Description: fmt.Sprintf("%#v", callexpr.Fun.Pos()),
 	}
+}
+
+// isGinEngine checks whether a type is a gin engine, or embeds a gin engine.
+func isGinEngine(ty types.Type) bool {
+	for {
+		if ty.String() == "github.com/gin-gonic/gin.Engine" {
+			return true
+		} else if ty.String() == "github.com/gin-gonic/gin.RouterGroup" {
+			// TODO: this is not correct, we should walk up to compute the correct absolute path
+			return true
+		} else if ptr, ok := ty.(*types.Pointer); ok {
+			ty = ptr.Elem()
+		} else if named, ok := ty.(*types.Named); ok {
+			ty = named.Underlying()
+		} else {
+			break
+		}
+	}
+
+	if strct, ok := ty.(*types.Struct); ok {
+		for i, max := 0, strct.NumFields(); i < max; i++ {
+			if f := strct.Field(i); f.Embedded() && isGinEngine(f.Type()) {
+				return true
+			}
+		}
+	}
+
+	return false
 }

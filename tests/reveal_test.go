@@ -15,21 +15,23 @@ import (
 
 func TestReveal(t *testing.T) {
 	_, currentFilename, _, _ := runtime.Caller(0)
-	currentDir := path.Dir(currentFilename)
+	currentDirname := path.Dir(currentFilename)
 
-	files, err := os.ReadDir(currentDir)
+	files, err := os.ReadDir(currentDirname)
 	if err != nil {
 		panic(err)
 	}
 
-	for _, dir := range files {
-		if !dir.IsDir() {
+	for _, file := range files {
+		if !file.IsDir() {
 			continue
 		}
+		dirname := file.Name()
 
-		dirname := dir.Name()
 		t.Run(dirname, func(t *testing.T) {
-			expected, err := ioutil.ReadFile(dirname + "/openapi3.json")
+			t.Parallel()
+
+			expected, err := ioutil.ReadFile(path.Join(dirname, "openapi3.json"))
 			if err != nil {
 				panic(err)
 			}
