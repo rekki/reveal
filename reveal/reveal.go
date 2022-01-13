@@ -19,13 +19,14 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-func Reveal(ctx context.Context, rootPkg string) (*openapi3.T, error) {
+func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
 	cfg := &packages.Config{
 		Context: ctx,
-		Dir:     rootPkg,
+		Dir:     rootDir,
 		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedExportsFile | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedModule,
 	}
-	pkgs, err := packages.Load(cfg, "pattern="+rootPkg)
+
+	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
 		return nil, err
 	}
