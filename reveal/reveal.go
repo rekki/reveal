@@ -27,17 +27,17 @@ import (
 var githubRegexp = regexp.MustCompilePOSIX(`^git@github\.com:([^/]+/[^.]+)\.git$`)
 
 func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-
-	dir, err = homedir.Expand(dir)
+	dir, err := homedir.Expand(dir)
 	if err != nil {
 		return nil, err
 	}
 
 	if !strings.HasPrefix(dir, "/") {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+
 		dir = path.Clean(path.Join(wd, dir))
 	}
 
