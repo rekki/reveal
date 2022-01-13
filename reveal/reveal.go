@@ -45,7 +45,7 @@ func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
 	doc := &openapi3.T{
 		OpenAPI: "3.0.0",
 		Info: &openapi3.Info{
-			Title:   "service-xxx",
+			Title:   rootDir,
 			Version: version,
 		},
 		Paths: openapi3.Paths{},
