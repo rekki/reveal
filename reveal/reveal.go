@@ -67,7 +67,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Context: ctx,
 		Dir:     dir,
 		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedExportsFile | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedModule,
-	}, ".")
+	}, "./...")
 	if err != nil {
 		return nil, err
 	}
