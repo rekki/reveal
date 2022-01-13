@@ -1,10 +1,8 @@
 package reveal
 
-// TODO: support path parameters
 // TODO: support query parameters
 // TODO: support json input
 // TODO: support json output
-// TODO: add link to source code in endpoint description
 
 import (
 	"context"
@@ -13,41 +11,87 @@ import (
 	"go/token"
 	"go/types"
 	"net/http"
+	"os"
+	"path"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/storage/filesystem"
+	"github.com/mitchellh/go-homedir"
 	"golang.org/x/tools/go/packages"
 )
 
-func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
-	var version string
+var githubRegexp = regexp.MustCompilePOSIX(`^git@github\.com:([^/]+/[^.]+)\.git$`)
 
-	if repo, err := git.PlainOpenWithOptions(rootDir, &git.PlainOpenOptions{
+func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+
+	dir, err = homedir.Expand(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	if !strings.HasPrefix(dir, "/") {
+		dir = path.Clean(path.Join(wd, dir))
+	}
+
+	var gitRoot, githubUserRepo, gitHash string
+
+	if repo, err := git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{
 		DetectDotGit: true,
 	}); err == nil {
+		if remote, err := repo.Remote("origin"); err == nil {
+			if urls := remote.Config().URLs; len(urls) > 0 {
+				if matches := githubRegexp.FindStringSubmatch(urls[0]); len(matches) == 2 {
+					githubUserRepo = matches[1]
+				}
+			}
+		}
+
+		if storage, ok := repo.Storer.(*filesystem.Storage); ok {
+			gitRoot = path.Dir(storage.Filesystem().Root())
+		}
+
 		if head, err := repo.Head(); err == nil {
-			version = head.Hash().String()
+			gitHash = head.Hash().String()
 		}
 	}
 
-	cfg := &packages.Config{
+	pkgs, err := packages.Load(&packages.Config{
 		Context: ctx,
-		Dir:     rootDir,
+		Dir:     dir,
 		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedExportsFile | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedModule,
-	}
-
-	pkgs, err := packages.Load(cfg, ".")
+	}, ".")
 	if err != nil {
 		return nil, err
+	}
+
+	title := dir
+	var description string
+
+	if len(gitRoot) > 0 {
+		title = path.Clean("." + strings.TrimPrefix(title, gitRoot))
+		if len(githubUserRepo) > 0 {
+			url := "https://github.com/" + githubUserRepo
+			if len(gitHash) > 0 {
+				url += "/tree/" + gitHash + "/" + title
+			}
+			description = fmt.Sprintf("Source: [%s]", url)
+		}
 	}
 
 	doc := &openapi3.T{
 		OpenAPI: "3.0.0",
 		Info: &openapi3.Info{
-			Title:   rootDir,
-			Version: version,
+			Title:       title,
+			Description: description,
+			Version:     gitHash,
 		},
 		Paths: openapi3.Paths{},
 	}
@@ -56,14 +100,20 @@ func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
 		for _, file := range pkg.Syntax {
 			ast.Inspect(file, func(n ast.Node) bool {
 				if callexpr, ok := n.(*ast.CallExpr); ok {
-					if method, path, ok := intoMethodPath(callexpr, pkg); ok {
-						path, pathParams := expandPath(path)
-						operation := intoOperation(callexpr, pathParams)
+					if method, httpPath, ok := intoMethodPath(callexpr, pkg); ok {
+						httpPath, pathParams := expandPath(httpPath)
+						operation := intoOperation(callexpr, pathParams, pkg.Fset, func(filename string, start, end int) string {
+							if len(gitRoot) > 0 && len(gitHash) > 0 && len(githubUserRepo) > 0 {
+								filename = path.Clean("." + strings.TrimPrefix(filename, gitRoot))
+								return fmt.Sprintf("https://github.com/%s/blob/%s/%s#L%d-L%d", githubUserRepo, gitHash, filename, start, end)
+							}
+							return fmt.Sprintf("%s:%d", filename, start)
+						})
 
-						item, ok := doc.Paths[path]
+						item, ok := doc.Paths[httpPath]
 						if !ok {
 							item = &openapi3.PathItem{}
-							doc.Paths[path] = item
+							doc.Paths[httpPath] = item
 						}
 
 						switch method {
@@ -83,6 +133,8 @@ func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
 							item.Options = operation
 						}
 					}
+
+					return false // don't go any deeper
 				}
 
 				return true
@@ -134,9 +186,13 @@ func intoMethodPath(callexpr *ast.CallExpr, pkg *packages.Package) (string, stri
 	return "", "", false
 }
 
-func intoOperation(callexpr *ast.CallExpr, pathParameters openapi3.Parameters) *openapi3.Operation {
+func intoOperation(callexpr *ast.CallExpr, pathParameters openapi3.Parameters, fset *token.FileSet, formatDesc func(string, int, int) string) *openapi3.Operation {
+	lastArg := callexpr.Args[len(callexpr.Args)-1]
+	start := fset.Position(lastArg.Pos())
+	end := fset.Position(lastArg.End())
+
 	return &openapi3.Operation{
-		Description: fmt.Sprintf("%#v", callexpr.Fun.Pos()),
+		Description: formatDesc(start.Filename, start.Line, end.Line),
 		Parameters:  append(openapi3.Parameters{
 			// TODO
 		}, pathParameters...),
