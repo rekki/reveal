@@ -13,6 +13,7 @@ import (
 	"go/token"
 	"go/types"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -56,7 +57,8 @@ func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
 			ast.Inspect(file, func(n ast.Node) bool {
 				if callexpr, ok := n.(*ast.CallExpr); ok {
 					if method, path, ok := intoMethodPath(callexpr, pkg); ok {
-						operation := intoOperation(callexpr)
+						path, pathParams := expandPath(path)
+						operation := intoOperation(callexpr, pathParams)
 
 						item, ok := doc.Paths[path]
 						if !ok {
@@ -132,10 +134,40 @@ func intoMethodPath(callexpr *ast.CallExpr, pkg *packages.Package) (string, stri
 	return "", "", false
 }
 
-func intoOperation(callexpr *ast.CallExpr) *openapi3.Operation {
+func intoOperation(callexpr *ast.CallExpr, pathParameters openapi3.Parameters) *openapi3.Operation {
 	return &openapi3.Operation{
 		Description: fmt.Sprintf("%#v", callexpr.Fun.Pos()),
+		Parameters:  append(openapi3.Parameters{
+			// TODO
+		}, pathParameters...),
 	}
+}
+
+var expandPathRegexp = regexp.MustCompilePOSIX(`\/:[^\/]+`)
+
+func expandPath(path string) (string, openapi3.Parameters) {
+	params := openapi3.Parameters{}
+
+	path = expandPathRegexp.ReplaceAllStringFunc(path, func(match string) string {
+		name := match[2:]
+
+		params = append(params, &openapi3.ParameterRef{
+			Value: &openapi3.Parameter{
+				In:       openapi3.ParameterInPath,
+				Name:     name,
+				Required: true,
+				Schema: &openapi3.SchemaRef{
+					Value: &openapi3.Schema{
+						Type: openapi3.TypeString,
+					},
+				},
+			},
+		})
+
+		return "/{" + name + "}"
+	})
+
+	return path, params
 }
 
 // isGinEngine checks whether a type is a gin engine, or embeds a gin engine.
