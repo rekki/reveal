@@ -23,6 +23,8 @@ func main() {
 	if err := svc.Run(":8080"); err != nil {
 		panic(err)
 	}
+
+	main2() // to prevent dead code lint error
 }
 
 func main2() {
