@@ -105,7 +105,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 						operation := intoOperation(callexpr, pathParams, pkg.Fset, func(filename string, start, end int) string {
 							if len(gitRoot) > 0 && len(gitHash) > 0 && len(githubUserRepo) > 0 {
 								filename = path.Clean("." + strings.TrimPrefix(filename, gitRoot))
-								return fmt.Sprintf("https://github.com/%s/blob/%s/%s#L%d-L%d", githubUserRepo, gitHash, filename, start, end)
+								return fmt.Sprintf("Source: [https://github.com/%s/blob/%s/%s#L%d-L%d]", githubUserRepo, gitHash, filename, start, end)
 							}
 							return fmt.Sprintf("%s:%d", filename, start)
 						})
