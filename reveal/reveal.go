@@ -32,7 +32,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		return nil, err
 	}
 
-	if !strings.HasPrefix(dir, "/") {
+	if !path.IsAbs(dir) {
 		wd, err := os.Getwd()
 		if err != nil {
 			return nil, err
