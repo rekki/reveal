@@ -16,10 +16,21 @@ import (
 	"strconv"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/go-git/go-git/v5"
 	"golang.org/x/tools/go/packages"
 )
 
 func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
+	var version string
+
+	if repo, err := git.PlainOpenWithOptions(rootDir, &git.PlainOpenOptions{
+		DetectDotGit: true,
+	}); err == nil {
+		if head, err := repo.Head(); err == nil {
+			version = head.Hash().String()
+		}
+	}
+
 	cfg := &packages.Config{
 		Context: ctx,
 		Dir:     rootDir,
@@ -35,7 +46,7 @@ func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
 		OpenAPI: "3.0.0",
 		Info: &openapi3.Info{
 			Title:   "service-xxx",
-			Version: "git hash",
+			Version: version,
 		},
 		Paths: openapi3.Paths{},
 	}

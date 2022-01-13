@@ -1,1 +1,1 @@
-{}
+{"components":{},"info":{"title":"service-xxx","version":"git hash"},"openapi":"3.0.0","paths":{"/main":{"get":{"description":"10672903","responses":null}},"/main2":{"get":{"description":"10673149","responses":null}}}}
