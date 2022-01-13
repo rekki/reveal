@@ -9,6 +9,7 @@ import (
 func main() {
 	router := gin.Default()
 
+	// it should support http methods
 	router.DELETE("/", func(c *gin.Context) {})
 	router.GET("/", func(c *gin.Context) {})
 	router.HEAD("/", func(c *gin.Context) {})
@@ -16,25 +17,14 @@ func main() {
 	router.PATCH("/", func(c *gin.Context) {})
 	router.POST("/", func(c *gin.Context) {})
 	router.PUT("/", func(c *gin.Context) {})
+
+	// it should support custom http methods
 	router.Handle(http.MethodConnect, "/", func(c *gin.Context) {})
 
-	a := router.Group("/a")
-	{
-		a.GET("/", func(c *gin.Context) {})
-		a.Handle(http.MethodConnect, "/", func(c *gin.Context) {})
+	// it should support route parameters
+	router.GET("/users/:id", func(c *gin.Context) {})
 
-		b := a.Group("/b")
-		{
-			b.GET("/", func(c *gin.Context) {})
-			b.Handle(http.MethodConnect, "/", func(c *gin.Context) {})
-
-			c := b.Group("/c")
-			{
-				c.GET("/", func(c *gin.Context) {})
-				c.Handle(http.MethodConnect, "/", func(c *gin.Context) {})
-			}
-		}
+	if err := router.Run(":8080"); err != nil {
+		panic(err)
 	}
-
-	router.Run(":8080")
 }

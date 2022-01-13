@@ -11,6 +11,7 @@ type GinEngine struct {
 }
 
 func main() {
+	// it should support embedded gin engines
 	svc := Service{
 		GinEngine: GinEngine{
 			Engine: gin.Default(),
@@ -19,5 +20,7 @@ func main() {
 
 	svc.GET("/user", func(c *gin.Context) {})
 
-	svc.Run(":8080")
+	if err := svc.Run(":8080"); err != nil {
+		panic(err)
+	}
 }
