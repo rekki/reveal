@@ -143,19 +143,20 @@ func intoOperation(callexpr *ast.CallExpr, pathParameters openapi3.Parameters) *
 	}
 }
 
-var expandPathRegexp = regexp.MustCompilePOSIX(`\/:[^\/]+`)
+var expandPathRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
 
 func expandPath(path string) (string, openapi3.Parameters) {
 	params := openapi3.Parameters{}
 
 	path = expandPathRegexp.ReplaceAllStringFunc(path, func(match string) string {
+		required := match[1] == ':'
 		name := match[2:]
 
 		params = append(params, &openapi3.ParameterRef{
 			Value: &openapi3.Parameter{
 				In:       openapi3.ParameterInPath,
 				Name:     name,
-				Required: true,
+				Required: required,
 				Schema: &openapi3.SchemaRef{
 					Value: &openapi3.Schema{
 						Type: openapi3.TypeString,

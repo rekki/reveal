@@ -21,10 +21,6 @@ func main() {
 	// it should support custom http methods
 	router.Handle(http.MethodConnect, "/", func(c *gin.Context) {})
 
-	// it should support route parameters
-	router.GET("/users/:id", func(c *gin.Context) {})
-	router.GET("/users/:a/:b/:c", func(c *gin.Context) {})
-
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
 	}
