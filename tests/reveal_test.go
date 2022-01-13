@@ -22,19 +22,19 @@ func TestReveal(t *testing.T) {
 		panic(err)
 	}
 
-	for _, file := range files {
-		if !file.IsDir() {
+	for _, dir := range files {
+		if !dir.IsDir() {
 			continue
 		}
 
-		filename := file.Name()
-		t.Run(filename, func(t *testing.T) {
-			expected, err := ioutil.ReadFile(filename + ".json")
+		dirname := dir.Name()
+		t.Run(dirname, func(t *testing.T) {
+			expected, err := ioutil.ReadFile(dirname + "/openapi3.json")
 			if err != nil {
 				panic(err)
 			}
 
-			out, err := reveal.Reveal(context.Background(), filename)
+			out, err := reveal.Reveal(context.Background(), dirname)
 			if err != nil {
 				panic(err)
 			}
