@@ -37,9 +37,10 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		dir = path.Clean(path.Join(wd, dir))
+		dir = path.Join(wd, dir)
 	}
+
+	dir = path.Clean(dir)
 
 	var gitRoot, githubUserRepo, gitHash string
 
