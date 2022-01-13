@@ -18,9 +18,27 @@ func main() {
 		},
 	}
 
-	svc.GET("/user", func(c *gin.Context) {})
+	svc.GET("/main", func(c *gin.Context) {})
 
 	if err := svc.Run(":8080"); err != nil {
+		panic(err)
+	}
+}
+
+func main2() {
+	svc := struct {
+		service Service
+	}{
+		service: Service{
+			GinEngine: GinEngine{
+				Engine: gin.Default(),
+			},
+		},
+	}
+
+	svc.service.GET("/main2", func(c *gin.Context) {})
+
+	if err := svc.service.Run(":8080"); err != nil {
 		panic(err)
 	}
 }

@@ -82,27 +82,35 @@ func Reveal(ctx context.Context, rootDir string) (*openapi3.T, error) {
 
 func intoMethodPath(callexpr *ast.CallExpr, pkg *packages.Package) (string, string, bool) {
 	if selector, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
-		if x, ok := selector.X.(*ast.Ident); ok {
-			if isGinEngine(pkg.TypesInfo.Uses[x].Type()) {
-				if len(callexpr.Args) > 1 {
-					if path, ok := callexpr.Args[0].(*ast.BasicLit); ok && path.Kind == token.STRING {
-						if p, err := strconv.Unquote(path.Value); err == nil {
-							switch selector.Sel.Name {
-							case "POST":
-								return http.MethodPost, p, true
-							case "GET":
-								return http.MethodGet, p, true
-							case "HEAD":
-								return http.MethodHead, p, true
-							case "PUT":
-								return http.MethodPut, p, true
-							case "PATCH":
-								return http.MethodPatch, p, true
-							case "DELETE":
-								return http.MethodDelete, p, true
-							case "OPTIONS":
-								return http.MethodOptions, p, true
-							}
+
+		var x *ast.Ident
+		if ident, ok := selector.X.(*ast.Ident); ok {
+			x = ident
+		} else if selectorexpr, ok := selector.X.(*ast.SelectorExpr); ok {
+			x = selectorexpr.Sel
+		} else {
+			return "", "", false
+		}
+
+		if isGinEngine(pkg.TypesInfo.Uses[x].Type()) {
+			if len(callexpr.Args) > 1 {
+				if path, ok := callexpr.Args[0].(*ast.BasicLit); ok && path.Kind == token.STRING {
+					if p, err := strconv.Unquote(path.Value); err == nil {
+						switch selector.Sel.Name {
+						case "POST":
+							return http.MethodPost, p, true
+						case "GET":
+							return http.MethodGet, p, true
+						case "HEAD":
+							return http.MethodHead, p, true
+						case "PUT":
+							return http.MethodPut, p, true
+						case "PATCH":
+							return http.MethodPatch, p, true
+						case "DELETE":
+							return http.MethodDelete, p, true
+						case "OPTIONS":
+							return http.MethodOptions, p, true
 						}
 					}
 				}
