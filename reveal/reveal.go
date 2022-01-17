@@ -1,5 +1,6 @@
 package reveal
 
+// TODO: support router.Handle
 // TODO: support query parameters
 // TODO: support json input
 // TODO: support json output
@@ -103,6 +104,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 				if callexpr, ok := n.(*ast.CallExpr); ok {
 					if method, httpPath, ok := intoMethodPath(callexpr, pkg); ok {
 						httpPath, pathParams := expandPath(httpPath)
+
 						operation := intoOperation(callexpr, pathParams, pkg.Fset, func(filename string, start, end int) string {
 							if len(gitRoot) > 0 && len(gitHash) > 0 && len(githubUserRepo) > 0 {
 								filename = path.Clean("." + strings.TrimPrefix(filename, gitRoot))
