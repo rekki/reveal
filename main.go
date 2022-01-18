@@ -18,7 +18,9 @@ func main() {
 		panic(err)
 	}
 
-	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("  ", "  ")
+	if err := enc.Encode(out); err != nil {
 		panic(err)
 	}
 }

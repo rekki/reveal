@@ -99,15 +99,20 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 
 	// Browse the ASTs
 
-	var graph Graph
+	graph := NewGraph()
 
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Syntax {
 			ast.Inspect(file, func(n ast.Node) bool {
 				if node, ok := extractRoute(n, pkg, gitRoot, githubUserRepo, gitHash); ok {
 					graph.Nodes = append(graph.Nodes, node)
-					return false
 				}
+
+				if ident, expr, ok := extractEdge(n, pkg); ok {
+					fmt.Printf("%v -> %v\n", ident, expr)
+					graph.Edges[ident] = expr
+				}
+
 				return true
 			})
 		}
@@ -126,8 +131,11 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 	}
 
 	for _, node := range graph.Nodes {
-		rootedPath := node.RootedPath()
+		if len(node.Method) == 0 {
+			continue
+		}
 
+		rootedPath := node.RootedPath(graph)
 		item, ok := doc.Paths[rootedPath]
 		if !ok {
 			item = &openapi3.PathItem{}
@@ -149,8 +157,6 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			item.Delete = node.Operation
 		case http.MethodOptions:
 			item.Options = node.Operation
-		default:
-			return nil, fmt.Errorf("unsupported http method: %v", node.Method)
 		}
 	}
 
@@ -180,6 +186,21 @@ func extractRoute(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo, gi
 	kind := resolveGinKind(pkg.TypesInfo.Uses[x].Type())
 	if kind == Unsupported {
 		return nil, false
+	}
+
+	// handle groups and exit
+	if selector.Sel.Name == "Group" {
+		if len(callexpr.Args) >= 1 {
+			httpPath, httpPathParams, err := extractPathAndPathParams(callexpr.Args[0].(*ast.BasicLit))
+			if err != nil {
+				return nil, false
+			}
+			return &Node{
+				ASTNode:    n,
+				Path:       httpPath,
+				PathParams: httpPathParams,
+			}, true
+		}
 	}
 
 	// get first arg (the http path) / last arg (the handler)
@@ -237,18 +258,18 @@ func extractRoute(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo, gi
 	}
 
 	return &Node{
+		ASTNode:    n,
+		Path:       httpPath,
+		PathParams: httpPathParams,
+		//
 		Method: httpMethod,
-		Path:   httpPath,
 		Operation: &openapi3.Operation{
 			Description: description,
-			Parameters:  append(openapi3.Parameters{
-				// TODO
-			}, httpPathParams...),
 		},
 	}, true
 }
 
-var pathParamsRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
+var pathAndPathParamsRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
 
 func extractPathAndPathParams(lit *ast.BasicLit) (string, openapi3.Parameters, error) {
 	unquoted, err := strconv.Unquote(lit.Value)
@@ -256,13 +277,12 @@ func extractPathAndPathParams(lit *ast.BasicLit) (string, openapi3.Parameters, e
 		return "", nil, err
 	}
 
-	params := openapi3.Parameters{}
-
-	out := pathParamsRegexp.ReplaceAllStringFunc(unquoted, func(match string) string {
+	pathParams := openapi3.Parameters{}
+	path := pathAndPathParamsRegexp.ReplaceAllStringFunc(unquoted, func(match string) string {
 		required := match[1] == ':'
 		name := match[2:]
 
-		params = append(params, &openapi3.ParameterRef{
+		pathParams = append(pathParams, &openapi3.ParameterRef{
 			Value: &openapi3.Parameter{
 				In:       openapi3.ParameterInPath,
 				Name:     name,
@@ -278,7 +298,49 @@ func extractPathAndPathParams(lit *ast.BasicLit) (string, openapi3.Parameters, e
 		return "/{" + name + "}"
 	})
 
-	return out, params, nil
+	return path, pathParams, nil
+}
+
+func extractEdge(n ast.Node, pkg *packages.Package) (*ast.Ident, ast.Expr, bool) {
+	if assignstmt, ok := n.(*ast.AssignStmt); ok {
+		for i, lhs := range assignstmt.Lhs {
+			if len(assignstmt.Rhs) > i {
+				if ident, ok := lhs.(*ast.Ident); ok {
+					if def := pkg.TypesInfo.Defs[ident]; def != nil {
+						if kind := resolveGinKind(def.Type()); kind != Unsupported {
+							return ident, assignstmt.Rhs[i], true
+						}
+					}
+
+					if use := pkg.TypesInfo.Uses[ident]; use != nil {
+						if kind := resolveGinKind(use.Type()); kind != Unsupported {
+							return ident, assignstmt.Rhs[i], true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if valuespec, ok := n.(*ast.ValueSpec); ok {
+		for i, ident := range valuespec.Names {
+			if len(valuespec.Values) > i {
+				if def := pkg.TypesInfo.Defs[ident]; def != nil {
+					if kind := resolveGinKind(def.Type()); kind != Unsupported {
+						return ident, valuespec.Values[i], true
+					}
+				}
+
+				if use := pkg.TypesInfo.Uses[ident]; use != nil {
+					if kind := resolveGinKind(use.Type()); kind != Unsupported {
+						return ident, valuespec.Values[i], true
+					}
+				}
+			}
+		}
+	}
+
+	return nil, nil, false
 }
 
 type GinKind int
