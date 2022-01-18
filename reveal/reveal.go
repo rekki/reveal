@@ -1,9 +1,10 @@
 package reveal
 
+// TODO: support router.Group
 // TODO: support router.Handle
-// TODO: support query parameters
-// TODO: support json input
-// TODO: support json output
+// TODO: support in/out headers
+// TODO: support in/out json body
+// TODO: support in query parameters
 
 import (
 	"context"
@@ -28,6 +29,8 @@ import (
 var githubRegexp = regexp.MustCompilePOSIX(`^git@github\.com:([^/]+/[^.]+)\.git$`)
 
 func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
+	// Resolve the root path to the directory
+
 	dir, err := homedir.Expand(dir)
 	if err != nil {
 		return nil, err
@@ -43,11 +46,17 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 
 	dir = path.Clean(dir)
 
+	// Try to acquire git infos
+
 	var gitRoot, githubUserRepo, gitHash string
 
 	if repo, err := git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{
 		DetectDotGit: true,
 	}); err == nil {
+		if storage, ok := repo.Storer.(*filesystem.Storage); ok {
+			gitRoot = path.Dir(storage.Filesystem().Root())
+		}
+
 		if remote, err := repo.Remote("origin"); err == nil {
 			if urls := remote.Config().URLs; len(urls) > 0 {
 				if matches := githubRegexp.FindStringSubmatch(urls[0]); len(matches) == 2 {
@@ -56,25 +65,14 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			}
 		}
 
-		if storage, ok := repo.Storer.(*filesystem.Storage); ok {
-			gitRoot = path.Dir(storage.Filesystem().Root())
-		}
-
 		if head, err := repo.Head(); err == nil {
 			gitHash = head.Hash().String()
 		}
 	}
 
-	pkgs, err := packages.Load(&packages.Config{
-		Context: ctx,
-		Dir:     dir,
-		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedExportsFile | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedModule,
-	}, "./...")
-	if err != nil {
-		return nil, err
-	}
+	// Prepare the title/description
 
-	title := dir
+	var title = dir
 	var description string
 
 	if len(gitRoot) > 0 {
@@ -88,6 +86,35 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		}
 	}
 
+	// Parse code and resolve types
+
+	pkgs, err := packages.Load(&packages.Config{
+		Context: ctx,
+		Dir:     dir,
+		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedExportsFile | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedModule,
+	}, "./...")
+	if err != nil {
+		return nil, err
+	}
+
+	// Browse the ASTs
+
+	var graph Graph
+
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Syntax {
+			ast.Inspect(file, func(n ast.Node) bool {
+				if node, ok := extractRoute(n, pkg, gitRoot, githubUserRepo, gitHash); ok {
+					graph.Nodes = append(graph.Nodes, node)
+					return false
+				}
+				return true
+			})
+		}
+	}
+
+	// Build the OpenAPI schema
+
 	doc := &openapi3.T{
 		OpenAPI: "3.0.0",
 		Info: &openapi3.Info{
@@ -98,116 +125,140 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Paths: openapi3.Paths{},
 	}
 
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Syntax {
-			ast.Inspect(file, func(n ast.Node) bool {
-				if callexpr, ok := n.(*ast.CallExpr); ok {
-					if method, httpPath, ok := intoMethodPath(callexpr, pkg); ok {
-						httpPath, pathParams := expandPath(httpPath)
+	for _, node := range graph.Nodes {
+		rootedPath := node.RootedPath()
 
-						operation := intoOperation(callexpr, pathParams, pkg.Fset, func(filename string, start, end int) string {
-							if len(gitRoot) > 0 && len(gitHash) > 0 && len(githubUserRepo) > 0 {
-								filename = path.Clean("." + strings.TrimPrefix(filename, gitRoot))
-								return fmt.Sprintf("Source: [https://github.com/%s/blob/%s/%s#L%d-L%d]", githubUserRepo, gitHash, filename, start, end)
-							}
-							return fmt.Sprintf("%s:%d", filename, start)
-						})
+		item, ok := doc.Paths[rootedPath]
+		if !ok {
+			item = &openapi3.PathItem{}
+			doc.Paths[rootedPath] = item
+		}
 
-						item, ok := doc.Paths[httpPath]
-						if !ok {
-							item = &openapi3.PathItem{}
-							doc.Paths[httpPath] = item
-						}
-
-						switch method {
-						case http.MethodPost:
-							item.Post = operation
-						case http.MethodGet:
-							item.Get = operation
-						case http.MethodHead:
-							item.Head = operation
-						case http.MethodPut:
-							item.Put = operation
-						case http.MethodPatch:
-							item.Patch = operation
-						case http.MethodDelete:
-							item.Delete = operation
-						case http.MethodOptions:
-							item.Options = operation
-						}
-					}
-
-					return false // don't go any deeper
-				}
-
-				return true
-			})
+		switch node.Method {
+		case http.MethodPost:
+			item.Post = node.Operation
+		case http.MethodGet:
+			item.Get = node.Operation
+		case http.MethodHead:
+			item.Head = node.Operation
+		case http.MethodPut:
+			item.Put = node.Operation
+		case http.MethodPatch:
+			item.Patch = node.Operation
+		case http.MethodDelete:
+			item.Delete = node.Operation
+		case http.MethodOptions:
+			item.Options = node.Operation
+		default:
+			return nil, fmt.Errorf("unsupported http method: %v", node.Method)
 		}
 	}
 
 	return doc, nil
 }
 
-func intoMethodPath(callexpr *ast.CallExpr, pkg *packages.Package) (string, string, bool) {
-	if selector, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
-
-		var x *ast.Ident
-		if ident, ok := selector.X.(*ast.Ident); ok {
-			x = ident
-		} else if selectorexpr, ok := selector.X.(*ast.SelectorExpr); ok {
-			x = selectorexpr.Sel
-		} else {
-			return "", "", false
-		}
-
-		if isGinEngine(pkg.TypesInfo.Uses[x].Type()) {
-			if len(callexpr.Args) > 1 {
-				if path, ok := callexpr.Args[0].(*ast.BasicLit); ok && path.Kind == token.STRING {
-					if p, err := strconv.Unquote(path.Value); err == nil {
-						switch selector.Sel.Name {
-						case "POST":
-							return http.MethodPost, p, true
-						case "GET":
-							return http.MethodGet, p, true
-						case "HEAD":
-							return http.MethodHead, p, true
-						case "PUT":
-							return http.MethodPut, p, true
-						case "PATCH":
-							return http.MethodPatch, p, true
-						case "DELETE":
-							return http.MethodDelete, p, true
-						case "OPTIONS":
-							return http.MethodOptions, p, true
-						}
-					}
-				}
-			}
-		}
+func extractRoute(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo, gitHash string) (*Node, bool) {
+	callexpr, ok := n.(*ast.CallExpr)
+	if !ok {
+		return nil, false
 	}
 
-	return "", "", false
-}
+	selector, ok := callexpr.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
 
-func intoOperation(callexpr *ast.CallExpr, pathParameters openapi3.Parameters, fset *token.FileSet, formatDesc func(string, int, int) string) *openapi3.Operation {
+	var x *ast.Ident
+	if ident, ok := selector.X.(*ast.Ident); ok {
+		x = ident
+	} else if selectorexpr, ok := selector.X.(*ast.SelectorExpr); ok {
+		x = selectorexpr.Sel
+	} else {
+		return nil, false
+	}
+
+	kind := resolveGinKind(pkg.TypesInfo.Uses[x].Type())
+	if kind == Unsupported {
+		return nil, false
+	}
+
+	// get first arg (the http path) / last arg (the handler)
+	if len(callexpr.Args) < 2 {
+		return nil, false
+	}
+	firstArg, ok := callexpr.Args[0].(*ast.BasicLit)
+	if !(ok && firstArg.Kind == token.STRING) {
+		return nil, false
+	}
 	lastArg := callexpr.Args[len(callexpr.Args)-1]
-	start := fset.Position(lastArg.Pos())
-	end := fset.Position(lastArg.End())
+	lastArgStartPos := pkg.Fset.Position(lastArg.Pos())
+	lastArgEndPos := pkg.Fset.Position(lastArg.End())
 
-	return &openapi3.Operation{
-		Description: formatDesc(start.Filename, start.Line, end.Line),
-		Parameters:  append(openapi3.Parameters{
-			// TODO
-		}, pathParameters...),
+	// get the http method
+	var httpMethod string
+	switch selector.Sel.Name {
+	case "POST":
+		httpMethod = http.MethodPost
+	case "GET":
+		httpMethod = http.MethodGet
+	case "HEAD":
+		httpMethod = http.MethodHead
+	case "PUT":
+		httpMethod = http.MethodPut
+	case "PATCH":
+		httpMethod = http.MethodPatch
+	case "DELETE":
+		httpMethod = http.MethodDelete
+	case "OPTIONS":
+		httpMethod = http.MethodOptions
+	default:
+		return nil, false
 	}
+
+	// get the http path + path parameters
+	httpPath, httpPathParams, err := extractPathAndPathParams(firstArg)
+	if err != nil {
+		return nil, false
+	}
+
+	// description
+	var description string
+	if len(gitRoot) > 0 && len(gitHash) > 0 && len(githubUserRepo) > 0 {
+		description = fmt.Sprintf(
+			"Source: [https://github.com/%s/blob/%s/%s#L%d-L%d]",
+			githubUserRepo,
+			gitHash,
+			path.Clean("."+strings.TrimPrefix(lastArgEndPos.Filename, gitRoot)),
+			lastArgStartPos.Line,
+			lastArgEndPos.Line,
+		)
+	} else {
+		description = fmt.Sprintf("%s:%d", lastArgStartPos.Filename, lastArgStartPos.Line)
+	}
+
+	return &Node{
+		Method: httpMethod,
+		Path:   httpPath,
+		Operation: &openapi3.Operation{
+			Description: description,
+			Parameters:  append(openapi3.Parameters{
+				// TODO
+			}, httpPathParams...),
+		},
+	}, true
 }
 
-var expandPathRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
+var pathParamsRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
 
-func expandPath(path string) (string, openapi3.Parameters) {
+func extractPathAndPathParams(lit *ast.BasicLit) (string, openapi3.Parameters, error) {
+	unquoted, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return "", nil, err
+	}
+
 	params := openapi3.Parameters{}
 
-	path = expandPathRegexp.ReplaceAllStringFunc(path, func(match string) string {
+	out := pathParamsRegexp.ReplaceAllStringFunc(unquoted, func(match string) string {
 		required := match[1] == ':'
 		name := match[2:]
 
@@ -227,17 +278,23 @@ func expandPath(path string) (string, openapi3.Parameters) {
 		return "/{" + name + "}"
 	})
 
-	return path, params
+	return out, params, nil
 }
 
-// isGinEngine checks whether a type is a gin engine, or embeds a gin engine.
-func isGinEngine(ty types.Type) bool {
+type GinKind int
+
+const (
+	Unsupported GinKind = iota
+	Engine
+	RouterGroup
+)
+
+func resolveGinKind(ty types.Type) GinKind {
 	for {
 		if ty.String() == "github.com/gin-gonic/gin.Engine" {
-			return true
+			return Engine
 		} else if ty.String() == "github.com/gin-gonic/gin.RouterGroup" {
-			// TODO: this is not correct, we should walk up to compute the correct absolute path
-			return true
+			return RouterGroup
 		} else if ptr, ok := ty.(*types.Pointer); ok {
 			ty = ptr.Elem()
 		} else if named, ok := ty.(*types.Named); ok {
@@ -249,11 +306,13 @@ func isGinEngine(ty types.Type) bool {
 
 	if strct, ok := ty.(*types.Struct); ok {
 		for i, max := 0, strct.NumFields(); i < max; i++ {
-			if f := strct.Field(i); f.Embedded() && isGinEngine(f.Type()) {
-				return true
+			if f := strct.Field(i); f.Embedded() {
+				if kind := resolveGinKind(f.Type()); kind != Unsupported {
+					return kind
+				}
 			}
 		}
 	}
 
-	return false
+	return Unsupported
 }
