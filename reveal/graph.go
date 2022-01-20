@@ -48,7 +48,6 @@ func (g *Graph) RootedPathAndParams(e *Endpoint) (string, openapi3.Parameters) {
 }
 
 type Group struct {
-	Up         *ast.Ident
 	ASTNode    ast.Node
 	Path       string
 	PathParams openapi3.Parameters
