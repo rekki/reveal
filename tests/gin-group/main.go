@@ -7,20 +7,35 @@ import (
 func main() {
 	router := gin.Default()
 
-	router.GET("/root", func(c *gin.Context) {})
+	r := router
+	var rr *gin.Engine //nolint:gosimple
+	rr = r
+	var rrr *gin.Engine = rr
 
-	// it should support (nested) groups
-	a := router.Group("/a")
+	rrr.GET("/root", func(c *gin.Context) {})
+
+	a := rrr.Group("/:a")
+	var aa *gin.RouterGroup //nolint:gosimple
+	aa = a
+	var aaa *gin.RouterGroup = aa
+
 	{
-		a.GET("/under-a", func(c *gin.Context) {})
+		aaa.GET("/under-a", func(c *gin.Context) {})
 
-		b := a.Group("/b")
+		b := aaa.Group("/b")
+		var bb *gin.RouterGroup //nolint:gosimple
+		bb = b
+		var bbb *gin.RouterGroup = bb
+
 		{
-			b.GET("/under-a-b", func(c *gin.Context) {})
+			bbb.GET("/under-a-b", func(c *gin.Context) {})
 
-			c := b.Group("/c")
+			c := bbb.Group("/c")
+			var cc *gin.RouterGroup //nolint:gosimple
+			cc = c
+			var ccc *gin.RouterGroup = cc
 			{
-				c.GET("/under-a-b-c", func(c *gin.Context) {})
+				ccc.GET("/under-a-b-c", func(c *gin.Context) {})
 			}
 		}
 	}
