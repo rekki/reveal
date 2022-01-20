@@ -31,11 +31,12 @@ func (g *Graph) RootedPathAndParams(e *Endpoint) (string, openapi3.Parameters) {
 			return path, params
 		}
 
+		if group, ok := g.Groups[current]; ok {
+			path = group.Path + path
+			params = append(params, group.PathParams...)
+		}
+
 		if callexpr, ok := current.(*ast.CallExpr); ok {
-			if group, ok := g.Groups[current]; ok {
-				path = group.Path + path
-				params = append(params, group.PathParams...)
-			}
 			if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
 				current = selectorexpr.X.(*ast.Ident)
 			} else {

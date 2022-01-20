@@ -1,6 +1,5 @@
 package reveal
 
-// TODO: support router.Group
 // TODO: support router.Handle
 // TODO: support in/out headers
 // TODO: support in/out json body
@@ -328,7 +327,7 @@ func extractPathAndPathParams(lit *ast.BasicLit) (string, openapi3.Parameters, e
 		return "/{" + name + "}"
 	})
 
-	return strings.TrimSuffix("/"+strings.TrimLeft(path, "/"), "/"), params, nil
+	return "/" + strings.TrimLeft(strings.TrimRight(path, "/"), "/"), params, nil
 }
 
 func extractEdge(n ast.Node, pkg *packages.Package) (*ast.Ident, ast.Expr, bool) {
