@@ -104,13 +104,12 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Syntax {
 			ast.Inspect(file, func(n ast.Node) bool {
-				if node, ok := extractRoute(n, pkg, gitRoot, githubUserRepo, gitHash); ok {
-					graph.Nodes = append(graph.Nodes, node)
-				}
-
-				if ident, expr, ok := extractEdge(n, pkg); ok {
-					fmt.Printf("%v -> %v\n", ident, expr)
-					graph.Edges[ident] = expr
+				if group, ok := extractGroup(n, pkg); ok {
+					graph.Groups[n] = group
+				} else if endpoint, ok := extractEndpoint(n, pkg, gitRoot, githubUserRepo, gitHash); ok {
+					graph.Endpoints[n] = endpoint
+				} else if ident, expr, ok := extractEdge(n, pkg); ok {
+					graph.Idents[ident.Name] = expr
 				}
 
 				return true
@@ -130,40 +129,41 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Paths: openapi3.Paths{},
 	}
 
-	for _, node := range graph.Nodes {
-		if len(node.Method) == 0 {
-			continue
-		}
-
-		rootedPath := node.RootedPath(graph)
+	for _, endpoint := range graph.Endpoints {
+		rootedPath, rootedParams := graph.RootedPathAndParams(endpoint)
 		item, ok := doc.Paths[rootedPath]
 		if !ok {
 			item = &openapi3.PathItem{}
 			doc.Paths[rootedPath] = item
 		}
 
-		switch node.Method {
+		operation := &openapi3.Operation{
+			Parameters:  rootedParams,
+			Description: endpoint.Description,
+		}
+
+		switch endpoint.Method {
 		case http.MethodPost:
-			item.Post = node.Operation
+			item.Post = operation
 		case http.MethodGet:
-			item.Get = node.Operation
+			item.Get = operation
 		case http.MethodHead:
-			item.Head = node.Operation
+			item.Head = operation
 		case http.MethodPut:
-			item.Put = node.Operation
+			item.Put = operation
 		case http.MethodPatch:
-			item.Patch = node.Operation
+			item.Patch = operation
 		case http.MethodDelete:
-			item.Delete = node.Operation
+			item.Delete = operation
 		case http.MethodOptions:
-			item.Options = node.Operation
+			item.Options = operation
 		}
 	}
 
 	return doc, nil
 }
 
-func extractRoute(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo, gitHash string) (*Node, bool) {
+func extractGroup(n ast.Node, pkg *packages.Package) (*Group, bool) {
 	callexpr, ok := n.(*ast.CallExpr)
 	if !ok {
 		return nil, false
@@ -188,19 +188,49 @@ func extractRoute(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo, gi
 		return nil, false
 	}
 
-	// handle groups and exit
-	if selector.Sel.Name == "Group" {
-		if len(callexpr.Args) >= 1 {
-			httpPath, httpPathParams, err := extractPathAndPathParams(callexpr.Args[0].(*ast.BasicLit))
-			if err != nil {
-				return nil, false
-			}
-			return &Node{
-				ASTNode:    n,
-				Path:       httpPath,
-				PathParams: httpPathParams,
-			}, true
-		}
+	if selector.Sel.Name != "Group" {
+		return nil, false
+	}
+
+	if len(callexpr.Args) < 1 {
+		return nil, false
+	}
+
+	httpPath, httpPathParams, err := extractPathAndPathParams(callexpr.Args[0].(*ast.BasicLit))
+	if err != nil {
+		return nil, false
+	}
+
+	return &Group{
+		ASTNode:    n,
+		Path:       httpPath,
+		PathParams: httpPathParams,
+	}, true
+}
+
+func extractEndpoint(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo, gitHash string) (*Endpoint, bool) {
+	callexpr, ok := n.(*ast.CallExpr)
+	if !ok {
+		return nil, false
+	}
+
+	selector, ok := callexpr.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
+
+	var x *ast.Ident
+	if ident, ok := selector.X.(*ast.Ident); ok {
+		x = ident
+	} else if selectorexpr, ok := selector.X.(*ast.SelectorExpr); ok {
+		x = selectorexpr.Sel
+	} else {
+		return nil, false
+	}
+
+	kind := resolveGinKind(pkg.TypesInfo.Uses[x].Type())
+	if kind == Unsupported {
+		return nil, false
 	}
 
 	// get first arg (the http path) / last arg (the handler)
@@ -257,15 +287,14 @@ func extractRoute(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo, gi
 		description = fmt.Sprintf("%s:%d", lastArgStartPos.Filename, lastArgStartPos.Line)
 	}
 
-	return &Node{
-		ASTNode:    n,
-		Path:       httpPath,
-		PathParams: httpPathParams,
-		//
-		Method: httpMethod,
-		Operation: &openapi3.Operation{
-			Description: description,
+	return &Endpoint{
+		Group: Group{
+			ASTNode:    n,
+			Path:       httpPath,
+			PathParams: httpPathParams,
 		},
+		Method:      httpMethod,
+		Description: description,
 	}, true
 }
 

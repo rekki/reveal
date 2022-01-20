@@ -7,46 +7,55 @@ import (
 )
 
 type Graph struct {
-	Nodes []*Node                 // vertices
-	Edges map[*ast.Ident]ast.Node // edges
+	Groups    map[ast.Node]*Group
+	Endpoints map[ast.Node]*Endpoint
+	Idents    map[string]ast.Node
 }
 
 func NewGraph() *Graph {
 	return &Graph{
-		Edges: map[*ast.Ident]ast.Node{},
+		Groups:    map[ast.Node]*Group{},
+		Endpoints: map[ast.Node]*Endpoint{},
+		Idents:    map[string]ast.Node{},
 	}
 }
 
-type Node struct {
-	// Common to endpoints and groups
-	ASTNode    ast.Node
-	Path       string
-	PathParams openapi3.Parameters
-	// Only for endpoints
-	Method    string
-	Operation *openapi3.Operation
-}
+func (g *Graph) RootedPathAndParams(e *Endpoint) (string, openapi3.Parameters) {
+	current := e.ASTNode
 
-func (n *Node) RootedPath(graph *Graph) string {
-	current := n.ASTNode
-	path := n.Path
+	path := e.Path
+	params := append(openapi3.Parameters{}, e.PathParams...)
 
 	for {
 		if current == nil {
-			return path
+			return path, params
 		}
 
 		if callexpr, ok := current.(*ast.CallExpr); ok {
-			if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
-				if selectorexpr.Sel.Name == "Default" {
-					return path
-				}
-				current = graph.Edges[selectorexpr.Sel]
+			if group, ok := g.Groups[current]; ok {
+				path = group.Path + path
+				params = append(params, group.PathParams...)
 			}
+			if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
+				current = selectorexpr.X.(*ast.Ident)
+			} else {
+				current = nil
+			}
+		} else if ident, ok := current.(*ast.Ident); ok {
+			current = g.Idents[ident.Name]
 		}
-
-		break
 	}
+}
 
-	return path + "___"
+type Group struct {
+	Up         *ast.Ident
+	ASTNode    ast.Node
+	Path       string
+	PathParams openapi3.Parameters
+}
+
+type Endpoint struct {
+	Group
+	Method      string
+	Description string
 }
