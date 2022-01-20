@@ -301,17 +301,18 @@ func extractEndpoint(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo,
 var pathAndPathParamsRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
 
 func extractPathAndPathParams(lit *ast.BasicLit) (string, openapi3.Parameters, error) {
-	unquoted, err := strconv.Unquote(lit.Value)
+	value, err := strconv.Unquote(lit.Value)
 	if err != nil {
 		return "", nil, err
 	}
 
-	pathParams := openapi3.Parameters{}
-	path := pathAndPathParamsRegexp.ReplaceAllStringFunc(unquoted, func(match string) string {
+	params := openapi3.Parameters{}
+
+	path := pathAndPathParamsRegexp.ReplaceAllStringFunc(value, func(match string) string {
 		required := match[1] == ':'
 		name := match[2:]
 
-		pathParams = append(pathParams, &openapi3.ParameterRef{
+		params = append(params, &openapi3.ParameterRef{
 			Value: &openapi3.Parameter{
 				In:       openapi3.ParameterInPath,
 				Name:     name,
@@ -327,7 +328,7 @@ func extractPathAndPathParams(lit *ast.BasicLit) (string, openapi3.Parameters, e
 		return "/{" + name + "}"
 	})
 
-	return path, pathParams, nil
+	return strings.TrimSuffix("/"+strings.TrimLeft(path, "/"), "/"), params, nil
 }
 
 func extractEdge(n ast.Node, pkg *packages.Package) (*ast.Ident, ast.Expr, bool) {
