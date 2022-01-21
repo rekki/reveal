@@ -135,9 +135,18 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			doc.Paths[rootedPath] = item
 		}
 
+		d200 := "source ..."
+
 		operation := &openapi3.Operation{
-			Parameters:  rootedParams,
 			Description: endpoint.Description,
+			Parameters:  rootedParams,
+			Responses: openapi3.Responses{
+				"200": &openapi3.ResponseRef{
+					Value: &openapi3.Response{
+						Description: &d200,
+					},
+				},
+			},
 		}
 
 		switch endpoint.Method {
@@ -160,6 +169,10 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		case http.MethodTrace:
 			item.Trace = operation
 		}
+	}
+
+	if err := doc.Validate(ctx); err != nil {
+		return nil, err
 	}
 
 	return doc, nil
