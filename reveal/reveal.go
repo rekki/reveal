@@ -9,13 +9,12 @@ import (
 	"context"
 	"fmt"
 	"go/ast"
-	"go/token"
+	"go/constant"
 	"go/types"
 	"net/http"
 	"os"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -142,20 +141,24 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		}
 
 		switch endpoint.Method {
-		case http.MethodPost:
-			item.Post = operation
+		case http.MethodConnect:
+			item.Connect = operation
+		case http.MethodDelete:
+			item.Delete = operation
 		case http.MethodGet:
 			item.Get = operation
 		case http.MethodHead:
 			item.Head = operation
-		case http.MethodPut:
-			item.Put = operation
-		case http.MethodPatch:
-			item.Patch = operation
-		case http.MethodDelete:
-			item.Delete = operation
 		case http.MethodOptions:
 			item.Options = operation
+		case http.MethodPatch:
+			item.Patch = operation
+		case http.MethodPost:
+			item.Post = operation
+		case http.MethodPut:
+			item.Put = operation
+		case http.MethodTrace:
+			item.Trace = operation
 		}
 	}
 
@@ -195,7 +198,7 @@ func extractGroup(n ast.Node, pkg *packages.Package) (*Group, bool) {
 		return nil, false
 	}
 
-	httpPath, httpPathParams, err := extractPathAndPathParams(callexpr.Args[0].(*ast.BasicLit))
+	httpPath, httpPathParams, err := extractPathAndPathParams(callexpr.Args[0], pkg)
 	if err != nil {
 		return nil, false
 	}
@@ -236,16 +239,13 @@ func extractEndpoint(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo,
 	if len(callexpr.Args) < 2 {
 		return nil, false
 	}
-	firstArg, ok := callexpr.Args[0].(*ast.BasicLit)
-	if !(ok && firstArg.Kind == token.STRING) {
-		return nil, false
-	}
-	lastArg := callexpr.Args[len(callexpr.Args)-1]
-	lastArgStartPos := pkg.Fset.Position(lastArg.Pos())
-	lastArgEndPos := pkg.Fset.Position(lastArg.End())
+	handlerArg := callexpr.Args[len(callexpr.Args)-1]
+	handlerArgStartPos := pkg.Fset.Position(handlerArg.Pos())
+	handlerArgEndPos := pkg.Fset.Position(handlerArg.End())
 
-	// get the http method
+	// get the http method and define which parameter is to be the route
 	var httpMethod string
+	pathArg := callexpr.Args[0]
 	switch selector.Sel.Name {
 	case "POST":
 		httpMethod = http.MethodPost
@@ -261,12 +261,15 @@ func extractEndpoint(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo,
 		httpMethod = http.MethodDelete
 	case "OPTIONS":
 		httpMethod = http.MethodOptions
+	case "Handle":
+		httpMethod = constant.StringVal(pkg.TypesInfo.Types[callexpr.Args[0]].Value)
+		pathArg = callexpr.Args[1]
 	default:
 		return nil, false
 	}
 
-	// get the http path + path parameters
-	httpPath, httpPathParams, err := extractPathAndPathParams(firstArg)
+	// extract the http path + path parameters
+	httpPath, httpPathParams, err := extractPathAndPathParams(pathArg, pkg)
 	if err != nil {
 		return nil, false
 	}
@@ -278,12 +281,12 @@ func extractEndpoint(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo,
 			"Source: [https://github.com/%s/blob/%s/%s#L%d-L%d]",
 			githubUserRepo,
 			gitHash,
-			path.Clean("."+strings.TrimPrefix(lastArgEndPos.Filename, gitRoot)),
-			lastArgStartPos.Line,
-			lastArgEndPos.Line,
+			path.Clean("."+strings.TrimPrefix(handlerArgEndPos.Filename, gitRoot)),
+			handlerArgStartPos.Line,
+			handlerArgEndPos.Line,
 		)
 	} else {
-		description = fmt.Sprintf("%s:%d", lastArgStartPos.Filename, lastArgStartPos.Line)
+		description = fmt.Sprintf("%s:%d", handlerArgStartPos.Filename, handlerArgStartPos.Line)
 	}
 
 	return &Endpoint{
@@ -299,15 +302,11 @@ func extractEndpoint(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo,
 
 var pathAndPathParamsRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
 
-func extractPathAndPathParams(lit *ast.BasicLit) (string, openapi3.Parameters, error) {
-	value, err := strconv.Unquote(lit.Value)
-	if err != nil {
-		return "", nil, err
-	}
-
+func extractPathAndPathParams(expr ast.Expr, pkg *packages.Package) (string, openapi3.Parameters, error) {
 	params := openapi3.Parameters{}
 
-	path := pathAndPathParamsRegexp.ReplaceAllStringFunc(value, func(match string) string {
+	path := constant.StringVal(pkg.TypesInfo.Types[expr].Value)
+	path = pathAndPathParamsRegexp.ReplaceAllStringFunc(path, func(match string) string {
 		required := match[1] == ':'
 		name := match[2:]
 

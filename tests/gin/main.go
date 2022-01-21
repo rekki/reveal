@@ -20,6 +20,12 @@ func main() {
 
 	// it should support custom http methods
 	router.Handle(http.MethodConnect, "/", func(c *gin.Context) {})
+	router.Handle(http.MethodTrace, "/", func(c *gin.Context) {})
+
+	// it should support const folding
+	const constFolding = "/const-folding"
+	router.Handle("GET", constFolding, func(c *gin.Context) {})
+	router.Handle(http.MethodHead, constFolding, func(c *gin.Context) {})
 
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
