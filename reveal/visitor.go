@@ -20,7 +20,7 @@ func (v *Visitor) Walk() {
 	for _, ast := range v.getASTs() {
 		for _, entrypoint := range v.getEntrypoints(ast) {
 			for _, engine := range v.getEngines(entrypoint) {
-				fmt.Printf("%#v\n", engine)
+				v.follow(engine)
 			}
 		}
 	}
@@ -64,13 +64,6 @@ func (v *Visitor) getEngines(fdecl *ast.FuncDecl) []*ast.Ident {
 								return false
 							}
 						}
-
-						if use := v.pkg.TypesInfo.Uses[ident]; use != nil {
-							if kind := resolveGinKind(use.Type()); kind == Engine {
-								out = append(out, ident)
-								return false
-							}
-						}
 					}
 				}
 			}
@@ -85,13 +78,6 @@ func (v *Visitor) getEngines(fdecl *ast.FuncDecl) []*ast.Ident {
 							return false
 						}
 					}
-
-					if use := v.pkg.TypesInfo.Uses[ident]; use != nil {
-						if kind := resolveGinKind(use.Type()); kind != Engine {
-							out = append(out, ident)
-							return false
-						}
-					}
 				}
 			}
 		}
@@ -100,6 +86,10 @@ func (v *Visitor) getEngines(fdecl *ast.FuncDecl) []*ast.Ident {
 	})
 
 	return out
+}
+
+func (v *Visitor) follow(ident *ast.Ident) {
+	fmt.Printf("%#v\n", ident)
 }
 
 type GinKind int

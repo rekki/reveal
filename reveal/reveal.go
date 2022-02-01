@@ -1,6 +1,5 @@
 package reveal
 
-// TODO: support router.Handle
 // TODO: support in/out headers
 // TODO: support in/out json body
 // TODO: support in query parameters
@@ -94,8 +93,8 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 
 	// Browse the AST
 
-	if len(pkgs) != 1 || len(pkgs[0].Syntax) != 1 {
-		return nil, errors.New("unexpected number of package/ast")
+	if len(pkgs) != 1 {
+		return nil, errors.New("unexpected number of packages")
 	}
 
 	v := NewVisitor(pkgs[0])
