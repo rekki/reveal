@@ -10,5 +10,5 @@ func Up(svc *gin.Engine) {
 
 	group.GET("endpoint", func(c *gin.Context) {})
 
-	b.Up(&svc.RouterGroup)
+	b.Up(group)
 }
