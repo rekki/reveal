@@ -20,7 +20,7 @@ func (v *Visitor) Walk() {
 	for _, ast := range v.getASTs() {
 		for _, entrypoint := range v.getEntrypoints(ast) {
 			for _, engine := range v.getEngines(entrypoint) {
-				v.follow(engine)
+				v.getEndpoints(ast, engine)
 			}
 		}
 	}
@@ -55,31 +55,27 @@ func (v *Visitor) getEngines(fdecl *ast.FuncDecl) []*ast.Ident {
 
 	ast.Inspect(fdecl, func(n ast.Node) bool {
 		if assignstmt, ok := n.(*ast.AssignStmt); ok {
-			for i, lhs := range assignstmt.Lhs {
-				if len(assignstmt.Rhs) > i {
-					if ident, ok := lhs.(*ast.Ident); ok {
-						if def := v.pkg.TypesInfo.Defs[ident]; def != nil {
-							if kind := resolveGinKind(def.Type()); kind == Engine {
-								out = append(out, ident)
-								return false
-							}
+			for _, lhs := range assignstmt.Lhs {
+				if ident, ok := lhs.(*ast.Ident); ok {
+					if def := v.pkg.TypesInfo.Defs[ident]; def != nil {
+						if kind := resolveGinKind(def.Type()); kind == Engine {
+							out = append(out, ident)
 						}
 					}
 				}
 			}
+			return false
 		}
 
 		if valuespec, ok := n.(*ast.ValueSpec); ok {
-			for i, ident := range valuespec.Names {
-				if len(valuespec.Values) > i {
-					if def := v.pkg.TypesInfo.Defs[ident]; def != nil {
-						if kind := resolveGinKind(def.Type()); kind != Engine {
-							out = append(out, ident)
-							return false
-						}
+			for _, ident := range valuespec.Names {
+				if def := v.pkg.TypesInfo.Defs[ident]; def != nil {
+					if kind := resolveGinKind(def.Type()); kind != Engine {
+						out = append(out, ident)
 					}
 				}
 			}
+			return false
 		}
 
 		return true
@@ -88,8 +84,8 @@ func (v *Visitor) getEngines(fdecl *ast.FuncDecl) []*ast.Ident {
 	return out
 }
 
-func (v *Visitor) follow(ident *ast.Ident) {
-	fmt.Printf("%#v\n", ident)
+func (v *Visitor) getEndpoints(ast *ast.File, engine *ast.Ident) {
+	fmt.Printf("%#v\n", engine)
 }
 
 type GinKind int
