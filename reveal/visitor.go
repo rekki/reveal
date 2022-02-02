@@ -78,11 +78,12 @@ func (v *Visitor) walk(file *ast.File) {
 			return false
 		}
 
-		if resolveGinKind(v.pkg.TypesInfo.Types[x].Type) != Unknown {
-			expr := v.resolveExpr(x) // expr defining the parent group
-			parent, ok := v.groups[expr]
-			if !ok {
+		if kind := resolveGinKind(v.pkg.TypesInfo.Types[x].Type); kind != Unknown {
+			var parent *Group
+			if kind == Engine {
 				parent = v.Root
+			} else {
+				parent = v.groups[v.resolveExpr(x)]
 			}
 
 			switch selector.Sel.Name {
