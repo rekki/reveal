@@ -23,7 +23,7 @@ func NewVisitor(pkg *packages.Package) *Visitor {
 		pkg,
 		map[ast.Expr]*Group{},
 		map[ast.Object]ast.Expr{},
-		&Group{Path: "/"},
+		&Group{},
 	}
 }
 
