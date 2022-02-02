@@ -84,30 +84,32 @@ func (v *Visitor) walk(file *ast.File) {
 			parent = v.Root
 		}
 
-		switch selector.Sel.Name {
-		case "Group":
-			if len(callexpr.Args) > 0 {
-				p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value))
-				g := &Group{Path: p, PathParams: pp}
-				v.groups[callexpr] = g
-				parent.groups = append(parent.groups, g)
-			}
-
-		case "Handle":
-			if len(callexpr.Args) > 1 {
-				m := constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value)
-				p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[1]].Value))
-				if len(m) > 0 && len(p) > 0 {
-					parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+		if resolveGinKind(v.pkg.TypesInfo.Types[x].Type) != Unknown {
+			switch selector.Sel.Name {
+			case "Group":
+				if len(callexpr.Args) > 0 {
+					p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value))
+					g := &Group{Path: p, PathParams: pp}
+					v.groups[callexpr] = g
+					parent.groups = append(parent.groups, g)
 				}
-			}
 
-		case "POST", "GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS":
-			if len(callexpr.Args) > 0 {
-				m := selector.Sel.Name
-				p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value))
-				if len(m) > 0 && len(p) > 0 {
-					parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+			case "Handle":
+				if len(callexpr.Args) > 1 {
+					m := constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value)
+					p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[1]].Value))
+					if len(m) > 0 && len(p) > 0 {
+						parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+					}
+				}
+
+			case "POST", "GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS":
+				if len(callexpr.Args) > 0 {
+					m := selector.Sel.Name
+					p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value))
+					if len(m) > 0 && len(p) > 0 {
+						parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+					}
 				}
 			}
 		}
@@ -159,12 +161,16 @@ func inferPath(input string) (string, openapi3.Parameters) {
 type GinKind int
 
 const (
-	Unsupported GinKind = iota
+	Unknown GinKind = iota
 	Engine
 	RouterGroup
 )
 
 func resolveGinKind(ty types.Type) GinKind {
+	if ty == nil {
+		return Unknown
+	}
+
 	for {
 		if ty.String() == "github.com/gin-gonic/gin.Engine" {
 			return Engine
@@ -182,12 +188,12 @@ func resolveGinKind(ty types.Type) GinKind {
 	if strct, ok := ty.(*types.Struct); ok {
 		for i, max := 0, strct.NumFields(); i < max; i++ {
 			if f := strct.Field(i); f.Embedded() {
-				if kind := resolveGinKind(f.Type()); kind != Unsupported {
+				if kind := resolveGinKind(f.Type()); kind != Unknown {
 					return kind
 				}
 			}
 		}
 	}
 
-	return Unsupported
+	return Unknown
 }
