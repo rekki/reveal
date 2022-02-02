@@ -6,7 +6,6 @@ package reveal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -93,10 +92,6 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 	}
 
 	// Browse the AST
-
-	if len(pkgs) != 1 {
-		return nil, errors.New("unexpected number of packages")
-	}
 
 	v := NewVisitor(pkgs[0])
 	v.Walk()

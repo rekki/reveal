@@ -41,7 +41,6 @@ func (v *Visitor) walk(file *ast.File) {
 				if i >= len(assignstmt.Rhs) {
 					break
 				}
-
 				if ident, ok := lhs.(*ast.Ident); ok {
 					v.edges[*ident.Obj] = assignstmt.Rhs[i]
 				}
@@ -113,10 +112,34 @@ func (v *Visitor) walk(file *ast.File) {
 					}
 				}
 			}
+
+			return false
+		}
+
+		for _, arg := range callexpr.Args {
+			if resolveGinKind(v.pkg.TypesInfo.Types[arg].Type) != Unknown {
+				v.followCallExpr(callexpr)
+				return false
+			}
 		}
 
 		return false
 	})
+}
+
+func (v *Visitor) followCallExpr(callexpr *ast.CallExpr) {
+	if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
+		if ident, ok := selectorexpr.X.(*ast.Ident); ok {
+			if pkgName, ok := v.pkg.TypesInfo.Uses[ident].(*types.PkgName); ok && pkgName != nil {
+				pkg := pkgName.Imported()
+
+				obj := pkg.Scope().Lookup(selectorexpr.Sel.Name)
+				if _, ok := obj.(*types.Func); ok {
+					// TODO: find function body + collect endpoints from there
+				}
+			}
+		}
+	}
 }
 
 func (v *Visitor) resolveExpr(x *ast.Ident) ast.Expr {
