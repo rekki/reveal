@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path"
 	"regexp"
@@ -110,6 +111,52 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			Version:     gitHash,
 		},
 		Paths: openapi3.Paths{},
+	}
+
+	for _, endpoint := range v.Root.Endpoints {
+		rootedPath := endpoint.Path
+		rootedParams := endpoint.PathParams
+
+		item, ok := doc.Paths[rootedPath]
+		if !ok {
+			item = &openapi3.PathItem{}
+			doc.Paths[rootedPath] = item
+		}
+
+		d200 := "source ..."
+
+		operation := &openapi3.Operation{
+			Description: endpoint.Description,
+			Parameters:  rootedParams,
+			Responses: openapi3.Responses{
+				"200": &openapi3.ResponseRef{
+					Value: &openapi3.Response{
+						Description: &d200,
+					},
+				},
+			},
+		}
+
+		switch endpoint.Method {
+		case http.MethodConnect:
+			item.Connect = operation
+		case http.MethodDelete:
+			item.Delete = operation
+		case http.MethodGet:
+			item.Get = operation
+		case http.MethodHead:
+			item.Head = operation
+		case http.MethodOptions:
+			item.Options = operation
+		case http.MethodPatch:
+			item.Patch = operation
+		case http.MethodPost:
+			item.Post = operation
+		case http.MethodPut:
+			item.Put = operation
+		case http.MethodTrace:
+			item.Trace = operation
+		}
 	}
 
 	if err := doc.Validate(ctx); err != nil {

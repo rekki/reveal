@@ -1,36 +1,60 @@
 package reveal
 
 import (
-	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/types"
+	"regexp"
+	"strings"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"golang.org/x/tools/go/packages"
 )
 
+type Group struct {
+	Path      string
+	Endpoints []*Endpoint
+}
+
+type Endpoint struct {
+	Method      string
+	Path        string
+	PathParams  openapi3.Parameters
+	Description string
+}
+
 type Visitor struct {
-	pkg *packages.Package
+	pkg  *packages.Package
+	Root *Group
 }
 
 func NewVisitor(pkg *packages.Package) *Visitor {
-	return &Visitor{pkg}
+	return &Visitor{pkg, &Group{"/", nil}}
 }
 
 func (v *Visitor) Walk() {
-	for _, ast := range v.getASTs() {
-		for _, entrypoint := range v.getEntrypoints(ast) {
-			for _, engine := range v.getEngines(entrypoint) {
-				v.getEndpoints(ast, engine)
-			}
-		}
+	if len(v.pkg.Syntax) < 1 {
+		return
 	}
-}
+	file := v.pkg.Syntax[0]
 
-func (v *Visitor) getASTs() []*ast.File {
-	return v.pkg.Syntax
+	entrypoints := v.getEntrypoints(file)
+	if len(entrypoints) < 1 {
+		return
+	}
+	entrypoint := entrypoints[0]
+
+	engines := v.getEngines(entrypoint)
+	if len(engines) < 1 {
+		return
+	}
+	engine := engines[0]
+
+	v.collectEndpoints(v.Root, file, v.pkg.TypesInfo.Defs[engine])
 }
 
 func (v *Visitor) getEntrypoints(file *ast.File) []*ast.FuncDecl {
+	// if we are in a main package we only want the main function
 	if file.Name.Name == "main" {
 		for _, decl := range file.Decls {
 			if fdecl, ok := decl.(*ast.FuncDecl); ok {
@@ -41,6 +65,7 @@ func (v *Visitor) getEntrypoints(file *ast.File) []*ast.FuncDecl {
 		}
 	}
 
+	// if we are not in a main package, we want all the exported functions
 	var out []*ast.FuncDecl
 	for _, decl := range file.Decls {
 		if fdecl, ok := decl.(*ast.FuncDecl); ok && fdecl.Name.IsExported() {
@@ -84,8 +109,84 @@ func (v *Visitor) getEngines(fdecl *ast.FuncDecl) []*ast.Ident {
 	return out
 }
 
-func (v *Visitor) getEndpoints(ast *ast.File, engine *ast.Ident) {
-	fmt.Printf("%#v\n", engine)
+func (v *Visitor) collectEndpoints(group *Group, file *ast.File, engine types.Object) {
+	ast.Inspect(file, func(n ast.Node) bool {
+		callexpr, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true // go deeper until we find a call expression
+		}
+
+		selector, ok := callexpr.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+
+		var x *ast.Ident
+		if ident, ok := selector.X.(*ast.Ident); ok {
+			x = ident
+		} else if selectorexpr, ok := selector.X.(*ast.SelectorExpr); ok {
+			x = selectorexpr.Sel
+		} else {
+			return false
+		}
+
+		if obj, ok := v.pkg.TypesInfo.Uses[x]; !ok || obj != engine {
+			return false
+		}
+
+		switch selector.Sel.Name {
+		case "Group":
+			// TODO: gather nested nodes
+
+		case "Handle":
+			if len(callexpr.Args) > 1 {
+				m := constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value)
+				p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[1]].Value))
+				if len(m) > 0 && len(p) > 0 {
+					group.Endpoints = append(group.Endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+				}
+			}
+
+		case "POST", "GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS":
+			if len(callexpr.Args) > 0 {
+				m := selector.Sel.Name
+				p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value))
+				if len(m) > 0 && len(p) > 0 {
+					group.Endpoints = append(group.Endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+				}
+			}
+		}
+
+		return false
+	})
+}
+
+var inferPathRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
+
+func inferPath(input string) (string, openapi3.Parameters) {
+	params := openapi3.Parameters{}
+
+	path := inferPathRegexp.ReplaceAllStringFunc(input, func(match string) string {
+		required := match[1] == ':'
+		name := match[2:]
+
+		params = append(params, &openapi3.ParameterRef{
+			Value: &openapi3.Parameter{
+				In:       openapi3.ParameterInPath,
+				Name:     name,
+				Required: required,
+				Schema: &openapi3.SchemaRef{
+					Value: &openapi3.Schema{
+						Type: openapi3.TypeString,
+					},
+				},
+			},
+		})
+
+		return "/{" + name + "}"
+	})
+
+	return "/" + strings.TrimLeft(strings.TrimRight(path, "/"), "/"), params
 }
 
 type GinKind int
