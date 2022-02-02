@@ -78,13 +78,13 @@ func (v *Visitor) walk(file *ast.File) {
 			return false
 		}
 
-		expr := v.resolveExpr(x) // expr defining the parent group
-		parent, ok := v.groups[expr]
-		if !ok {
-			parent = v.Root
-		}
-
 		if resolveGinKind(v.pkg.TypesInfo.Types[x].Type) != Unknown {
+			expr := v.resolveExpr(x) // expr defining the parent group
+			parent, ok := v.groups[expr]
+			if !ok {
+				parent = v.Root
+			}
+
 			switch selector.Sel.Name {
 			case "Group":
 				if len(callexpr.Args) > 0 {
