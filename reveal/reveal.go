@@ -113,7 +113,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Paths: openapi3.Paths{},
 	}
 
-	for _, endpoint := range v.Root.Endpoints {
+	for _, endpoint := range v.Root.Endpoints() {
 		rootedPath := endpoint.Path
 		rootedParams := endpoint.PathParams
 

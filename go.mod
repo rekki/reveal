@@ -6,6 +6,7 @@ require (
 	github.com/getkin/kin-openapi v0.88.0
 	github.com/gin-gonic/gin v1.7.7
 	github.com/go-git/go-git/v5 v5.4.2
+	github.com/mitchellh/go-homedir v1.1.0
 	github.com/nsf/jsondiff v0.0.0-20210926074059-1e845ec5d249
 	golang.org/x/tools v0.1.8
 )
@@ -32,7 +33,6 @@ require (
 	github.com/leodido/go-urn v1.2.0 // indirect
 	github.com/mailru/easyjson v0.0.0-20190626092158-b2ccc519800e // indirect
 	github.com/mattn/go-isatty v0.0.12 // indirect
-	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421 // indirect
 	github.com/modern-go/reflect2 v0.0.0-20180701023420-4b7aa43c6742 // indirect
 	github.com/sergi/go-diff v1.1.0 // indirect
