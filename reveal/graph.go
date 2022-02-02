@@ -11,7 +11,17 @@ type Group struct {
 }
 
 func (g *Group) Endpoints() []*Endpoint {
-	return nil
+	out := append([]*Endpoint{}, g.endpoints...)
+
+	for _, group := range g.groups {
+		for _, endpoint := range group.Endpoints() {
+			endpoint.Path = group.Path + endpoint.Path
+			endpoint.PathParams = append(endpoint.PathParams, group.PathParams...)
+			out = append(out, endpoint)
+		}
+	}
+
+	return out
 }
 
 type Endpoint struct {
