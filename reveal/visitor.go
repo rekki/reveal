@@ -82,7 +82,7 @@ func (v *Visitor) walk(file *ast.File) {
 			var parent *Group
 			if kind == Engine {
 				parent = v.Root
-			} else {
+			} else if kind == RouterGroup {
 				parent = v.groups[v.resolveExpr(x)]
 			}
 
