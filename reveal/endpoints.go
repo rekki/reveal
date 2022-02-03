@@ -11,7 +11,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-type Endpoints struct {
+type EndpointsVisitor struct {
 	root         *Group            // root group
 	entrypoint   *packages.Package // root package
 	pkgsByID     map[string]*packages.Package
@@ -19,8 +19,8 @@ type Endpoints struct {
 	exprsByIdent map[ast.Object]ast.Expr
 }
 
-func NewEndpoints(pkgs []*packages.Package) *Endpoints {
-	v := &Endpoints{
+func NewEndpointsVisitor(pkgs []*packages.Package) *EndpointsVisitor {
+	v := &EndpointsVisitor{
 		root:         &Group{},
 		entrypoint:   nil,
 		pkgsByID:     map[string]*packages.Package{},
@@ -39,17 +39,17 @@ func NewEndpoints(pkgs []*packages.Package) *Endpoints {
 	return v
 }
 
-func (v *Endpoints) Walk() {
+func (v *EndpointsVisitor) Walk() {
 	if v.entrypoint != nil {
 		v.walk(v.entrypoint.Syntax[0], v.entrypoint)
 	}
 }
 
-func (v *Endpoints) All() []*Endpoint {
+func (v *EndpointsVisitor) Endpoints() []*Endpoint {
 	return v.root.all()
 }
 
-func (v *Endpoints) walk(node ast.Node, pkg *packages.Package) {
+func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 	ast.Inspect(node, func(n ast.Node) bool {
 		// Gather and store assignements and var declarations as we find them to
 		// make it possible to resolve identifiers chains
@@ -138,31 +138,43 @@ func (v *Endpoints) walk(node ast.Node, pkg *packages.Package) {
 
 				switch selector.Sel.Name {
 				case "Group":
-					if len(callexpr.Args) > 0 {
+					if len(callexpr.Args) >= 1 {
 						if arg0, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
-							p, pp := inferPath(arg0)
-							g := &Group{Path: p, PathParams: pp}
+							path, pathParams := inferPath(arg0)
+							g := &Group{Path: path, Params: pathParams}
 							v.groupsByExpr[callexpr] = g
 							parent.groups = append(parent.groups, g)
 						}
 					}
 
 				case "Handle":
-					if len(callexpr.Args) > 1 {
+					if len(callexpr.Args) > 2 {
 						if m, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
 							if arg1, ok := v.foldConstant(callexpr.Args[1], pkg); ok {
-								p, pp := inferPath(arg1)
-								parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+								path, pathParams := inferPath(arg1)
+								handlerParams := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
+
+								endpoint := &Endpoint{Method: m, Path: path}
+								endpoint.Params = append(endpoint.Params, pathParams...)
+								endpoint.Params = append(endpoint.Params, handlerParams...)
+
+								parent.endpoints = append(parent.endpoints, endpoint)
 							}
 						}
 					}
 
 				case "POST", "GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS":
-					if len(callexpr.Args) > 0 {
+					if len(callexpr.Args) >= 2 {
 						m := selector.Sel.Name
 						if arg0, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
-							p, pp := inferPath(arg0)
-							parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+							path, pathParams := inferPath(arg0)
+							handlerParams := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
+
+							endpoint := &Endpoint{Method: m, Path: path}
+							endpoint.Params = append(endpoint.Params, pathParams...)
+							endpoint.Params = append(endpoint.Params, handlerParams...)
+
+							parent.endpoints = append(parent.endpoints, endpoint)
 						}
 					}
 				}
@@ -175,7 +187,7 @@ func (v *Endpoints) walk(node ast.Node, pkg *packages.Package) {
 	})
 }
 
-func (v *Endpoints) foldConstant(expr ast.Expr, pkg *packages.Package) (string, bool) {
+func (v *EndpointsVisitor) foldConstant(expr ast.Expr, pkg *packages.Package) (string, bool) {
 	ty, ok := pkg.TypesInfo.Types[expr]
 	if !ok {
 		return "", false
@@ -189,7 +201,69 @@ func (v *Endpoints) foldConstant(expr ast.Expr, pkg *packages.Package) (string, 
 	return folded, true
 }
 
-func (v *Endpoints) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *packages.Package) (*ast.FuncDecl, *packages.Package) {
+func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) openapi3.Parameters {
+	var out openapi3.Parameters
+
+	if lit, ok := expr.(*ast.FuncLit); ok {
+		ast.Inspect(lit, func(n ast.Node) bool {
+			if callexpr, ok := n.(*ast.CallExpr); ok {
+				if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
+					if isGinContext(pkg.TypesInfo.Types[selectorexpr.X].Type) {
+
+						switch selectorexpr.Sel.Name {
+						case "Query":
+							if len(callexpr.Args) > 0 {
+								if query, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+									out = append(out, &openapi3.ParameterRef{
+										Value: &openapi3.Parameter{
+											In:       openapi3.ParameterInQuery,
+											Name:     query,
+											Required: true,
+											Schema: &openapi3.SchemaRef{
+												Value: &openapi3.Schema{
+													Type: openapi3.TypeString,
+												},
+											},
+										},
+									})
+								}
+							}
+
+						case "DefaultQuery":
+							if len(callexpr.Args) > 1 {
+								if query, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+									if defaultValue, ok := v.foldConstant(callexpr.Args[1], pkg); ok {
+										out = append(out, &openapi3.ParameterRef{
+											Value: &openapi3.Parameter{
+												In:       openapi3.ParameterInQuery,
+												Name:     query,
+												Required: false,
+												Schema: &openapi3.SchemaRef{
+													Value: &openapi3.Schema{
+														Type:    openapi3.TypeString,
+														Default: defaultValue,
+													},
+												},
+											},
+										})
+									}
+								}
+							}
+						}
+
+					}
+				}
+				return false
+			}
+
+			return true
+		})
+	}
+
+	return out
+}
+
+func (v *EndpointsVisitor) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *packages.Package) (*ast.FuncDecl, *packages.Package) {
 	if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
 		if ident, ok := selectorexpr.X.(*ast.Ident); ok {
 			if fpkgName, ok := pkg.TypesInfo.Uses[ident].(*types.PkgName); ok && fpkgName != nil {
@@ -208,7 +282,7 @@ func (v *Endpoints) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *pack
 	return nil, nil
 }
 
-func (v *Endpoints) resolveExpr(x *ast.Ident) ast.Expr {
+func (v *EndpointsVisitor) resolveExpr(x *ast.Ident) ast.Expr {
 	if x.Obj != nil {
 		if resolved, ok := v.exprsByIdent[*x.Obj]; ok {
 			if ident, ok := resolved.(*ast.Ident); ok {
@@ -288,10 +362,13 @@ func resolveGinKind(ty types.Type) GinKind {
 	return Unknown
 }
 
+func isGinContext(ty types.Type) bool {
+	return ty != nil && ty.String() == "*github.com/gin-gonic/gin.Context"
+}
+
 type Group struct {
-	Path       string
-	PathParams openapi3.Parameters
-	//
+	Path      string
+	Params    openapi3.Parameters
 	groups    []*Group
 	endpoints []*Endpoint
 }
@@ -302,7 +379,7 @@ func (g *Group) all() []*Endpoint {
 	for _, group := range g.groups {
 		for _, endpoint := range group.all() {
 			endpoint.Path = group.Path + endpoint.Path
-			endpoint.PathParams = append(endpoint.PathParams, group.PathParams...)
+			endpoint.Params = append(endpoint.Params, group.Params...)
 			out = append(out, endpoint)
 		}
 	}
@@ -311,9 +388,8 @@ func (g *Group) all() []*Endpoint {
 }
 
 type Endpoint struct {
-	Path       string
-	PathParams openapi3.Parameters
-	//
+	Path        string
+	Params      openapi3.Parameters
 	Method      string
 	Description string
 }

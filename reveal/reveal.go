@@ -76,7 +76,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			if len(gitHash) > 0 {
 				url += "/tree/" + gitHash + "/" + title
 			}
-			description = fmt.Sprintf("Source: [%s]", url)
+			description = fmt.Sprintf("Source: [%s](%s)", url, url)
 		}
 	}
 
@@ -93,8 +93,8 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 
 	// Walk the ASTs to discover endpoints
 
-	endpoints := NewEndpoints(pkgs)
-	endpoints.Walk()
+	ev := NewEndpointsVisitor(pkgs)
+	ev.Walk()
 
 	// Build the OpenAPI schema
 
@@ -108,7 +108,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Paths: openapi3.Paths{},
 	}
 
-	for _, e := range endpoints.All() {
+	for _, e := range ev.Endpoints() {
 		item, ok := doc.Paths[e.Path]
 		if !ok {
 			item = &openapi3.PathItem{}
@@ -119,7 +119,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 
 		operation := &openapi3.Operation{
 			Description: e.Description,
-			Parameters:  e.PathParams,
+			Parameters:  e.Params,
 			Responses: openapi3.Responses{
 				"200": &openapi3.ResponseRef{
 					Value: &openapi3.Response{
