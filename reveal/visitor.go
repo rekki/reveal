@@ -1,9 +1,9 @@
 package reveal
 
 import (
-	"fmt"
 	"go/ast"
 	"go/constant"
+	"go/token"
 	"go/types"
 	"regexp"
 	"strings"
@@ -14,7 +14,7 @@ import (
 
 type Visitor struct {
 	Root         *Group            // root group
-	pkg          *packages.Package // root package
+	entrypoint   *packages.Package // root package
 	pkgsByID     map[string]*packages.Package
 	groupsByExpr map[ast.Expr]*Group
 	exprsByIdent map[ast.Object]ast.Expr
@@ -23,7 +23,7 @@ type Visitor struct {
 func NewVisitor(pkgs []*packages.Package) *Visitor {
 	v := &Visitor{
 		Root:         &Group{},
-		pkg:          nil,
+		entrypoint:   nil,
 		pkgsByID:     map[string]*packages.Package{},
 		groupsByExpr: map[ast.Expr]*Group{},
 		exprsByIdent: map[ast.Object]ast.Expr{},
@@ -31,8 +31,8 @@ func NewVisitor(pkgs []*packages.Package) *Visitor {
 
 	for _, pkg := range pkgs {
 		v.pkgsByID[pkg.ID] = pkg
-		if v.pkg == nil || len(pkg.ID) < len(v.pkg.ID) {
-			v.pkg = pkg
+		if v.entrypoint == nil || len(pkg.ID) < len(v.entrypoint.ID) {
+			v.entrypoint = pkg
 		}
 	}
 
@@ -40,13 +40,13 @@ func NewVisitor(pkgs []*packages.Package) *Visitor {
 }
 
 func (v *Visitor) Walk() {
-	if v.pkg != nil {
-		v.walk(v.pkg.Syntax[0])
+	if v.entrypoint != nil {
+		v.walk(v.entrypoint.Syntax[0], v.entrypoint)
 	}
 }
 
-func (v *Visitor) walk(file *ast.File) {
-	ast.Inspect(file, func(n ast.Node) bool {
+func (v *Visitor) walk(node ast.Node, pkg *packages.Package) {
+	ast.Inspect(node, func(n ast.Node) bool {
 		// Gather and store assignements and var declarations as we find them to
 		// make it possible to resolve identifiers chains
 		{
@@ -81,12 +81,24 @@ func (v *Visitor) walk(file *ast.File) {
 		// If we are passing a gin engine/routergroup as an argument to the
 		// function call, follow that function to its definition.
 		{
+			var follow bool
 			for _, arg := range callexpr.Args {
-				if resolveGinKind(v.pkg.TypesInfo.Types[arg].Type) != Unknown {
-					if fdecl := v.resolveFunctionDeclaration(callexpr); fdecl != nil {
-						fmt.Printf("%#v\n", fdecl)
+				if kind := resolveGinKind(pkg.TypesInfo.Types[arg].Type); kind != Unknown {
+					follow = true
+					break
+				}
+			}
+
+			if follow {
+				if fdecl, fpkg := v.resolveFunctionDeclaration(callexpr, pkg); fdecl != nil {
+					i := 0
+					for _, param := range fdecl.Type.Params.List {
+						for _, name := range param.Names {
+							v.exprsByIdent[*name.Obj] = callexpr.Args[i]
+							i++
+						}
 					}
-					return false
+					v.walk(fdecl, fpkg)
 				}
 			}
 		}
@@ -108,7 +120,7 @@ func (v *Visitor) walk(file *ast.File) {
 				return false
 			}
 
-			if kind := resolveGinKind(v.pkg.TypesInfo.Types[x].Type); kind != Unknown {
+			if kind := resolveGinKind(pkg.TypesInfo.Types[x].Type); kind != Unknown {
 				var parent *Group
 				if kind == Engine {
 					parent = v.Root
@@ -123,7 +135,7 @@ func (v *Visitor) walk(file *ast.File) {
 				switch selector.Sel.Name {
 				case "Group":
 					if len(callexpr.Args) > 0 {
-						if arg0, ok := v.foldConstant(callexpr.Args[0]); ok {
+						if arg0, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
 							p, pp := inferPath(arg0)
 							g := &Group{Path: p, PathParams: pp}
 							v.groupsByExpr[callexpr] = g
@@ -133,8 +145,8 @@ func (v *Visitor) walk(file *ast.File) {
 
 				case "Handle":
 					if len(callexpr.Args) > 1 {
-						if m, ok := v.foldConstant(callexpr.Args[0]); ok {
-							if arg1, ok := v.foldConstant(callexpr.Args[1]); ok {
+						if m, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+							if arg1, ok := v.foldConstant(callexpr.Args[1], pkg); ok {
 								p, pp := inferPath(arg1)
 								parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
 							}
@@ -144,7 +156,7 @@ func (v *Visitor) walk(file *ast.File) {
 				case "POST", "GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS":
 					if len(callexpr.Args) > 0 {
 						m := selector.Sel.Name
-						if arg0, ok := v.foldConstant(callexpr.Args[0]); ok {
+						if arg0, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
 							p, pp := inferPath(arg0)
 							parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
 						}
@@ -159,8 +171,8 @@ func (v *Visitor) walk(file *ast.File) {
 	})
 }
 
-func (v *Visitor) foldConstant(expr ast.Expr) (string, bool) {
-	ty, ok := v.pkg.TypesInfo.Types[expr]
+func (v *Visitor) foldConstant(expr ast.Expr, pkg *packages.Package) (string, bool) {
+	ty, ok := pkg.TypesInfo.Types[expr]
 	if !ok {
 		return "", false
 	}
@@ -173,23 +185,23 @@ func (v *Visitor) foldConstant(expr ast.Expr) (string, bool) {
 	return folded, true
 }
 
-func (v *Visitor) resolveFunctionDeclaration(callexpr *ast.CallExpr) *ast.FuncDecl {
+func (v *Visitor) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *packages.Package) (*ast.FuncDecl, *packages.Package) {
 	if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
 		if ident, ok := selectorexpr.X.(*ast.Ident); ok {
-			if pkgName, ok := v.pkg.TypesInfo.Uses[ident].(*types.PkgName); ok && pkgName != nil {
-				pkg := v.pkgsByID[pkgName.Imported().Path()]
-
-				for _, decl := range pkg.Syntax[0].Decls {
-					if fdecl, ok := decl.(*ast.FuncDecl); ok {
-						if fdecl.Name.IsExported() && fdecl.Name.Name == selectorexpr.Sel.Name {
-							return fdecl
+			if fpkgName, ok := pkg.TypesInfo.Uses[ident].(*types.PkgName); ok && fpkgName != nil {
+				if fpkg := v.pkgsByID[fpkgName.Imported().Path()]; fpkg != nil {
+					for _, decl := range fpkg.Syntax[0].Decls {
+						if fdecl, ok := decl.(*ast.FuncDecl); ok {
+							if fdecl.Name.IsExported() && fdecl.Name.Name == selectorexpr.Sel.Name {
+								return fdecl, fpkg
+							}
 						}
 					}
 				}
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func (v *Visitor) resolveExpr(x *ast.Ident) ast.Expr {
@@ -202,6 +214,10 @@ func (v *Visitor) resolveExpr(x *ast.Ident) ast.Expr {
 		}
 	}
 	return x
+}
+
+func (v *Visitor) position(p ast.Node) token.Position {
+	return v.entrypoint.Fset.Position(p.Pos())
 }
 
 var inferPathRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
