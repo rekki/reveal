@@ -91,10 +91,10 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		return nil, err
 	}
 
-	// Browse the ASTs
+	// Walk the ASTs to discover endpoints
 
-	v := NewVisitor(pkgs)
-	v.Walk()
+	endpoints := NewEndpoints(pkgs)
+	endpoints.Walk()
 
 	// Build the OpenAPI schema
 
@@ -108,7 +108,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Paths: openapi3.Paths{},
 	}
 
-	for _, e := range v.Root.Endpoints() {
+	for _, e := range endpoints.All() {
 		item, ok := doc.Paths[e.Path]
 		if !ok {
 			item = &openapi3.PathItem{}

@@ -11,17 +11,17 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-type Visitor struct {
-	Root         *Group            // root group
+type Endpoints struct {
+	root         *Group            // root group
 	entrypoint   *packages.Package // root package
 	pkgsByID     map[string]*packages.Package
 	groupsByExpr map[ast.Expr]*Group
 	exprsByIdent map[ast.Object]ast.Expr
 }
 
-func NewVisitor(pkgs []*packages.Package) *Visitor {
-	v := &Visitor{
-		Root:         &Group{},
+func NewEndpoints(pkgs []*packages.Package) *Endpoints {
+	v := &Endpoints{
+		root:         &Group{},
 		entrypoint:   nil,
 		pkgsByID:     map[string]*packages.Package{},
 		groupsByExpr: map[ast.Expr]*Group{},
@@ -39,13 +39,17 @@ func NewVisitor(pkgs []*packages.Package) *Visitor {
 	return v
 }
 
-func (v *Visitor) Walk() {
+func (v *Endpoints) Walk() {
 	if v.entrypoint != nil {
 		v.walk(v.entrypoint.Syntax[0], v.entrypoint)
 	}
 }
 
-func (v *Visitor) walk(node ast.Node, pkg *packages.Package) {
+func (v *Endpoints) All() []*Endpoint {
+	return v.root.all()
+}
+
+func (v *Endpoints) walk(node ast.Node, pkg *packages.Package) {
 	ast.Inspect(node, func(n ast.Node) bool {
 		// Gather and store assignements and var declarations as we find them to
 		// make it possible to resolve identifiers chains
@@ -123,7 +127,7 @@ func (v *Visitor) walk(node ast.Node, pkg *packages.Package) {
 			if kind := resolveGinKind(pkg.TypesInfo.Types[x].Type); kind != Unknown {
 				var parent *Group
 				if kind == Engine {
-					parent = v.Root
+					parent = v.root
 				} else if kind == RouterGroup {
 					parent = v.groupsByExpr[v.resolveExpr(x)]
 				}
@@ -171,7 +175,7 @@ func (v *Visitor) walk(node ast.Node, pkg *packages.Package) {
 	})
 }
 
-func (v *Visitor) foldConstant(expr ast.Expr, pkg *packages.Package) (string, bool) {
+func (v *Endpoints) foldConstant(expr ast.Expr, pkg *packages.Package) (string, bool) {
 	ty, ok := pkg.TypesInfo.Types[expr]
 	if !ok {
 		return "", false
@@ -185,7 +189,7 @@ func (v *Visitor) foldConstant(expr ast.Expr, pkg *packages.Package) (string, bo
 	return folded, true
 }
 
-func (v *Visitor) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *packages.Package) (*ast.FuncDecl, *packages.Package) {
+func (v *Endpoints) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *packages.Package) (*ast.FuncDecl, *packages.Package) {
 	if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
 		if ident, ok := selectorexpr.X.(*ast.Ident); ok {
 			if fpkgName, ok := pkg.TypesInfo.Uses[ident].(*types.PkgName); ok && fpkgName != nil {
@@ -204,7 +208,7 @@ func (v *Visitor) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *packag
 	return nil, nil
 }
 
-func (v *Visitor) resolveExpr(x *ast.Ident) ast.Expr {
+func (v *Endpoints) resolveExpr(x *ast.Ident) ast.Expr {
 	if x.Obj != nil {
 		if resolved, ok := v.exprsByIdent[*x.Obj]; ok {
 			if ident, ok := resolved.(*ast.Ident); ok {
@@ -282,4 +286,34 @@ func resolveGinKind(ty types.Type) GinKind {
 	}
 
 	return Unknown
+}
+
+type Group struct {
+	Path       string
+	PathParams openapi3.Parameters
+	//
+	groups    []*Group
+	endpoints []*Endpoint
+}
+
+func (g *Group) all() []*Endpoint {
+	out := append([]*Endpoint{}, g.endpoints...)
+
+	for _, group := range g.groups {
+		for _, endpoint := range group.all() {
+			endpoint.Path = group.Path + endpoint.Path
+			endpoint.PathParams = append(endpoint.PathParams, group.PathParams...)
+			out = append(out, endpoint)
+		}
+	}
+
+	return out
+}
+
+type Endpoint struct {
+	Path       string
+	PathParams openapi3.Parameters
+	//
+	Method      string
+	Description string
 }
