@@ -12,26 +12,36 @@ import (
 )
 
 type Visitor struct {
-	pkg    *packages.Package
-	groups map[ast.Expr]*Group     // maps engines/routergroup to groups
-	edges  map[ast.Object]ast.Expr // maps idents to exprs
-	Root   *Group
+	Root         *Group            // root group
+	pkg          *packages.Package // root package
+	pkgsByID     map[string]*packages.Package
+	groupsByExpr map[ast.Expr]*Group
+	exprsByIdent map[ast.Object]ast.Expr
 }
 
-func NewVisitor(pkg *packages.Package) *Visitor {
-	return &Visitor{
-		pkg,
-		map[ast.Expr]*Group{},
-		map[ast.Object]ast.Expr{},
-		&Group{},
+func NewVisitor(pkgs []*packages.Package) *Visitor {
+	v := &Visitor{
+		Root:         &Group{},
+		pkg:          nil,
+		pkgsByID:     map[string]*packages.Package{},
+		groupsByExpr: map[ast.Expr]*Group{},
+		exprsByIdent: map[ast.Object]ast.Expr{},
 	}
+
+	for _, pkg := range pkgs {
+		v.pkgsByID[pkg.ID] = pkg
+		if v.pkg == nil || len(pkg.ID) < len(v.pkg.ID) {
+			v.pkg = pkg
+		}
+	}
+
+	return v
 }
 
 func (v *Visitor) Walk() {
-	if len(v.pkg.Syntax) < 1 {
-		return
+	if v.pkg != nil {
+		v.walk(v.pkg.Syntax[0])
 	}
-	v.walk(v.pkg.Syntax[0])
 }
 
 func (v *Visitor) walk(file *ast.File) {
@@ -42,7 +52,7 @@ func (v *Visitor) walk(file *ast.File) {
 					break
 				}
 				if ident, ok := lhs.(*ast.Ident); ok {
-					v.edges[*ident.Obj] = assignstmt.Rhs[i]
+					v.exprsByIdent[*ident.Obj] = assignstmt.Rhs[i]
 				}
 			}
 			return true
@@ -53,7 +63,7 @@ func (v *Visitor) walk(file *ast.File) {
 				if i >= len(valuespec.Values) {
 					break
 				}
-				v.edges[*ident.Obj] = valuespec.Values[i]
+				v.exprsByIdent[*ident.Obj] = valuespec.Values[i]
 			}
 			return true
 		}
@@ -82,7 +92,7 @@ func (v *Visitor) walk(file *ast.File) {
 			if kind == Engine {
 				parent = v.Root
 			} else if kind == RouterGroup {
-				parent = v.groups[v.resolveExpr(x)]
+				parent = v.groupsByExpr[v.resolveExpr(x)]
 			}
 
 			if parent == nil {
@@ -95,7 +105,7 @@ func (v *Visitor) walk(file *ast.File) {
 					if arg0, ok := v.foldConstant(callexpr.Args[0]); ok {
 						p, pp := inferPath(arg0)
 						g := &Group{Path: p, PathParams: pp}
-						v.groups[callexpr] = g
+						v.groupsByExpr[callexpr] = g
 						parent.groups = append(parent.groups, g)
 					}
 				}
@@ -167,7 +177,7 @@ func (v *Visitor) followCallExpr(callexpr *ast.CallExpr) {
 
 func (v *Visitor) resolveExpr(x *ast.Ident) ast.Expr {
 	if x.Obj != nil {
-		if resolved, ok := v.edges[*x.Obj]; ok {
+		if resolved, ok := v.exprsByIdent[*x.Obj]; ok {
 			if ident, ok := resolved.(*ast.Ident); ok {
 				return v.resolveExpr(ident)
 			}

@@ -86,14 +86,14 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Context: ctx,
 		Dir:     dir,
 		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedExportsFile | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedModule,
-	}, ".")
+	}, "./...")
 	if err != nil {
 		return nil, err
 	}
 
-	// Browse the AST
+	// Browse the ASTs
 
-	v := NewVisitor(pkgs[0])
+	v := NewVisitor(pkgs)
 	v.Walk()
 
 	// Build the OpenAPI schema
@@ -108,21 +108,18 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Paths: openapi3.Paths{},
 	}
 
-	for _, endpoint := range v.Root.Endpoints() {
-		rootedPath := endpoint.Path
-		rootedParams := endpoint.PathParams
-
-		item, ok := doc.Paths[rootedPath]
+	for _, e := range v.Root.Endpoints() {
+		item, ok := doc.Paths[e.Path]
 		if !ok {
 			item = &openapi3.PathItem{}
-			doc.Paths[rootedPath] = item
+			doc.Paths[e.Path] = item
 		}
 
 		d200 := "source ..."
 
 		operation := &openapi3.Operation{
-			Description: endpoint.Description,
-			Parameters:  rootedParams,
+			Description: e.Description,
+			Parameters:  e.PathParams,
 			Responses: openapi3.Responses{
 				"200": &openapi3.ResponseRef{
 					Value: &openapi3.Response{
@@ -132,7 +129,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			},
 		}
 
-		switch endpoint.Method {
+		switch e.Method {
 		case http.MethodConnect:
 			item.Connect = operation
 		case http.MethodDelete:
