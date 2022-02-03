@@ -85,21 +85,30 @@ func (v *Visitor) walk(file *ast.File) {
 				parent = v.groups[v.resolveExpr(x)]
 			}
 
+			if parent == nil {
+				return false
+			}
+
 			switch selector.Sel.Name {
 			case "Group":
 				if len(callexpr.Args) > 0 {
-					p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value))
-					g := &Group{Path: p, PathParams: pp}
-					v.groups[callexpr] = g
-					parent.groups = append(parent.groups, g)
+					if arg0, ok := v.foldConstant(callexpr.Args[0]); ok {
+						p, pp := inferPath(arg0)
+						g := &Group{Path: p, PathParams: pp}
+						v.groups[callexpr] = g
+						parent.groups = append(parent.groups, g)
+					}
 				}
 
 			case "Handle":
 				if len(callexpr.Args) > 1 {
-					m := constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[0]].Value)
-					p, pp := inferPath(constant.StringVal(v.pkg.TypesInfo.Types[callexpr.Args[1]].Value))
-					if len(m) > 0 && len(p) > 0 {
-						parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+					if m, ok := v.foldConstant(callexpr.Args[0]); ok {
+						if arg1, ok := v.foldConstant(callexpr.Args[1]); ok {
+							p, pp := inferPath(arg1)
+							if len(m) > 0 && len(p) > 0 {
+								parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
+							}
+						}
 					}
 				}
 
@@ -125,6 +134,20 @@ func (v *Visitor) walk(file *ast.File) {
 
 		return false
 	})
+}
+
+func (v *Visitor) foldConstant(expr ast.Expr) (string, bool) {
+	ty, ok := v.pkg.TypesInfo.Types[expr]
+	if !ok {
+		return "", false
+	}
+
+	folded := constant.StringVal(ty.Value)
+	if len(folded) == 0 {
+		return "", false
+	}
+
+	return folded, true
 }
 
 func (v *Visitor) followCallExpr(callexpr *ast.CallExpr) {
