@@ -1,6 +1,5 @@
 package reveal
 
-// TODO: support router.Handle
 // TODO: support in/out headers
 // TODO: support in/out json body
 // TODO: support in query parameters
@@ -8,9 +7,6 @@ package reveal
 import (
 	"context"
 	"fmt"
-	"go/ast"
-	"go/constant"
-	"go/types"
 	"net/http"
 	"os"
 	"path"
@@ -97,23 +93,8 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 
 	// Browse the ASTs
 
-	graph := NewGraph()
-
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Syntax {
-			ast.Inspect(file, func(n ast.Node) bool {
-				if group, ok := extractGroup(n, pkg); ok {
-					graph.Groups[n] = group
-				} else if endpoint, ok := extractEndpoint(n, pkg, gitRoot, githubUserRepo, gitHash); ok {
-					graph.Endpoints[n] = endpoint
-				} else if ident, expr, ok := extractEdge(n, pkg); ok {
-					graph.Idents[ident.Name] = expr
-				}
-
-				return true
-			})
-		}
-	}
+	v := NewVisitor(pkgs)
+	v.Walk()
 
 	// Build the OpenAPI schema
 
@@ -127,19 +108,18 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		Paths: openapi3.Paths{},
 	}
 
-	for _, endpoint := range graph.Endpoints {
-		rootedPath, rootedParams := graph.RootedPathAndParams(endpoint)
-		item, ok := doc.Paths[rootedPath]
+	for _, e := range v.Root.Endpoints() {
+		item, ok := doc.Paths[e.Path]
 		if !ok {
 			item = &openapi3.PathItem{}
-			doc.Paths[rootedPath] = item
+			doc.Paths[e.Path] = item
 		}
 
 		d200 := "source ..."
 
 		operation := &openapi3.Operation{
-			Description: endpoint.Description,
-			Parameters:  rootedParams,
+			Description: e.Description,
+			Parameters:  e.PathParams,
 			Responses: openapi3.Responses{
 				"200": &openapi3.ResponseRef{
 					Value: &openapi3.Response{
@@ -149,7 +129,7 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			},
 		}
 
-		switch endpoint.Method {
+		switch e.Method {
 		case http.MethodConnect:
 			item.Connect = operation
 		case http.MethodDelete:
@@ -176,246 +156,4 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 	}
 
 	return doc, nil
-}
-
-func extractGroup(n ast.Node, pkg *packages.Package) (*Group, bool) {
-	callexpr, ok := n.(*ast.CallExpr)
-	if !ok {
-		return nil, false
-	}
-
-	selector, ok := callexpr.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return nil, false
-	}
-
-	var x *ast.Ident
-	if ident, ok := selector.X.(*ast.Ident); ok {
-		x = ident
-	} else if selectorexpr, ok := selector.X.(*ast.SelectorExpr); ok {
-		x = selectorexpr.Sel
-	} else {
-		return nil, false
-	}
-
-	kind := resolveGinKind(pkg.TypesInfo.Uses[x].Type())
-	if kind == Unsupported {
-		return nil, false
-	}
-
-	if selector.Sel.Name != "Group" {
-		return nil, false
-	}
-
-	if len(callexpr.Args) < 1 {
-		return nil, false
-	}
-
-	httpPath, httpPathParams, err := extractPathAndPathParams(callexpr.Args[0], pkg)
-	if err != nil {
-		return nil, false
-	}
-
-	return &Group{
-		ASTNode:    n,
-		Path:       httpPath,
-		PathParams: httpPathParams,
-	}, true
-}
-
-func extractEndpoint(n ast.Node, pkg *packages.Package, gitRoot, githubUserRepo, gitHash string) (*Endpoint, bool) {
-	callexpr, ok := n.(*ast.CallExpr)
-	if !ok {
-		return nil, false
-	}
-
-	selector, ok := callexpr.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return nil, false
-	}
-
-	var x *ast.Ident
-	if ident, ok := selector.X.(*ast.Ident); ok {
-		x = ident
-	} else if selectorexpr, ok := selector.X.(*ast.SelectorExpr); ok {
-		x = selectorexpr.Sel
-	} else {
-		return nil, false
-	}
-
-	kind := resolveGinKind(pkg.TypesInfo.Uses[x].Type())
-	if kind == Unsupported {
-		return nil, false
-	}
-
-	// get first arg (the http path) / last arg (the handler)
-	if len(callexpr.Args) < 2 {
-		return nil, false
-	}
-	handlerArg := callexpr.Args[len(callexpr.Args)-1]
-	handlerArgStartPos := pkg.Fset.Position(handlerArg.Pos())
-	handlerArgEndPos := pkg.Fset.Position(handlerArg.End())
-
-	// get the http method and define which parameter is to be the route
-	var httpMethod string
-	pathArg := callexpr.Args[0]
-	switch selector.Sel.Name {
-	case "POST":
-		httpMethod = http.MethodPost
-	case "GET":
-		httpMethod = http.MethodGet
-	case "HEAD":
-		httpMethod = http.MethodHead
-	case "PUT":
-		httpMethod = http.MethodPut
-	case "PATCH":
-		httpMethod = http.MethodPatch
-	case "DELETE":
-		httpMethod = http.MethodDelete
-	case "OPTIONS":
-		httpMethod = http.MethodOptions
-	case "Handle":
-		httpMethod = constant.StringVal(pkg.TypesInfo.Types[callexpr.Args[0]].Value)
-		pathArg = callexpr.Args[1]
-	default:
-		return nil, false
-	}
-
-	// extract the http path + path parameters
-	httpPath, httpPathParams, err := extractPathAndPathParams(pathArg, pkg)
-	if err != nil {
-		return nil, false
-	}
-
-	// description
-	var description string
-	if len(gitRoot) > 0 && len(gitHash) > 0 && len(githubUserRepo) > 0 {
-		description = fmt.Sprintf(
-			"Source: [https://github.com/%s/blob/%s/%s#L%d-L%d]",
-			githubUserRepo,
-			gitHash,
-			path.Clean("."+strings.TrimPrefix(handlerArgEndPos.Filename, gitRoot)),
-			handlerArgStartPos.Line,
-			handlerArgEndPos.Line,
-		)
-	} else {
-		description = fmt.Sprintf("%s:%d", handlerArgStartPos.Filename, handlerArgStartPos.Line)
-	}
-
-	return &Endpoint{
-		Group: Group{
-			ASTNode:    n,
-			Path:       httpPath,
-			PathParams: httpPathParams,
-		},
-		Method:      httpMethod,
-		Description: description,
-	}, true
-}
-
-var pathAndPathParamsRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
-
-func extractPathAndPathParams(expr ast.Expr, pkg *packages.Package) (string, openapi3.Parameters, error) {
-	params := openapi3.Parameters{}
-
-	path := constant.StringVal(pkg.TypesInfo.Types[expr].Value)
-	path = pathAndPathParamsRegexp.ReplaceAllStringFunc(path, func(match string) string {
-		required := match[1] == ':'
-		name := match[2:]
-
-		params = append(params, &openapi3.ParameterRef{
-			Value: &openapi3.Parameter{
-				In:       openapi3.ParameterInPath,
-				Name:     name,
-				Required: required,
-				Schema: &openapi3.SchemaRef{
-					Value: &openapi3.Schema{
-						Type: openapi3.TypeString,
-					},
-				},
-			},
-		})
-
-		return "/{" + name + "}"
-	})
-
-	return "/" + strings.TrimLeft(strings.TrimRight(path, "/"), "/"), params, nil
-}
-
-func extractEdge(n ast.Node, pkg *packages.Package) (*ast.Ident, ast.Expr, bool) {
-	if assignstmt, ok := n.(*ast.AssignStmt); ok {
-		for i, lhs := range assignstmt.Lhs {
-			if len(assignstmt.Rhs) > i {
-				if ident, ok := lhs.(*ast.Ident); ok {
-					if def := pkg.TypesInfo.Defs[ident]; def != nil {
-						if kind := resolveGinKind(def.Type()); kind != Unsupported {
-							return ident, assignstmt.Rhs[i], true
-						}
-					}
-
-					if use := pkg.TypesInfo.Uses[ident]; use != nil {
-						if kind := resolveGinKind(use.Type()); kind != Unsupported {
-							return ident, assignstmt.Rhs[i], true
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if valuespec, ok := n.(*ast.ValueSpec); ok {
-		for i, ident := range valuespec.Names {
-			if len(valuespec.Values) > i {
-				if def := pkg.TypesInfo.Defs[ident]; def != nil {
-					if kind := resolveGinKind(def.Type()); kind != Unsupported {
-						return ident, valuespec.Values[i], true
-					}
-				}
-
-				if use := pkg.TypesInfo.Uses[ident]; use != nil {
-					if kind := resolveGinKind(use.Type()); kind != Unsupported {
-						return ident, valuespec.Values[i], true
-					}
-				}
-			}
-		}
-	}
-
-	return nil, nil, false
-}
-
-type GinKind int
-
-const (
-	Unsupported GinKind = iota
-	Engine
-	RouterGroup
-)
-
-func resolveGinKind(ty types.Type) GinKind {
-	for {
-		if ty.String() == "github.com/gin-gonic/gin.Engine" {
-			return Engine
-		} else if ty.String() == "github.com/gin-gonic/gin.RouterGroup" {
-			return RouterGroup
-		} else if ptr, ok := ty.(*types.Pointer); ok {
-			ty = ptr.Elem()
-		} else if named, ok := ty.(*types.Named); ok {
-			ty = named.Underlying()
-		} else {
-			break
-		}
-	}
-
-	if strct, ok := ty.(*types.Struct); ok {
-		for i, max := 0, strct.NumFields(); i < max; i++ {
-			if f := strct.Field(i); f.Embedded() {
-				if kind := resolveGinKind(f.Type()); kind != Unsupported {
-					return kind
-				}
-			}
-		}
-	}
-
-	return Unsupported
 }

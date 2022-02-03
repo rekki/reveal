@@ -1,61 +1,33 @@
 package reveal
 
-import (
-	"go/ast"
-
-	"github.com/getkin/kin-openapi/openapi3"
-)
-
-type Graph struct {
-	Groups    map[ast.Node]*Group
-	Endpoints map[ast.Node]*Endpoint
-	Idents    map[string]ast.Node
-}
-
-func NewGraph() *Graph {
-	return &Graph{
-		Groups:    map[ast.Node]*Group{},
-		Endpoints: map[ast.Node]*Endpoint{},
-		Idents:    map[string]ast.Node{},
-	}
-}
-
-func (g *Graph) RootedPathAndParams(e *Endpoint) (string, openapi3.Parameters) {
-	current := e.ASTNode
-
-	path := e.Path
-	params := append(openapi3.Parameters{}, e.PathParams...)
-
-	for {
-		if current == nil {
-			return path, params
-		}
-
-		if group, ok := g.Groups[current]; ok {
-			path = group.Path + path
-			params = append(params, group.PathParams...)
-		}
-
-		if callexpr, ok := current.(*ast.CallExpr); ok {
-			if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
-				current = selectorexpr.X.(*ast.Ident)
-			} else {
-				current = nil
-			}
-		} else if ident, ok := current.(*ast.Ident); ok {
-			current = g.Idents[ident.Name]
-		}
-	}
-}
+import "github.com/getkin/kin-openapi/openapi3"
 
 type Group struct {
-	ASTNode    ast.Node
 	Path       string
 	PathParams openapi3.Parameters
+	//
+	groups    []*Group
+	endpoints []*Endpoint
+}
+
+func (g *Group) Endpoints() []*Endpoint {
+	out := append([]*Endpoint{}, g.endpoints...)
+
+	for _, group := range g.groups {
+		for _, endpoint := range group.Endpoints() {
+			endpoint.Path = group.Path + endpoint.Path
+			endpoint.PathParams = append(endpoint.PathParams, group.PathParams...)
+			out = append(out, endpoint)
+		}
+	}
+
+	return out
 }
 
 type Endpoint struct {
-	Group
+	Path       string
+	PathParams openapi3.Parameters
+	//
 	Method      string
 	Description string
 }

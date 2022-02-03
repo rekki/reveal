@@ -8,6 +8,13 @@ codebases that aims at extracting valuable information before runtime.
 - Generates [OpenAPI 3.0](https://swagger.io/specification/) schemas from
   [Gin](https://github.com/gin-gonic/gin) source code
 
+## Development
+
+```
+go run . <path> > /tmp/openapi.yaml
+redoc-cli serve -w /tmp/openapi.yaml # npm i -g redoc-cli
+```
+
 ## Implementation Notes
 
 reveal uses
