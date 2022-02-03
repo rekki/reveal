@@ -3,7 +3,6 @@ package reveal
 import (
 	"go/ast"
 	"go/constant"
-	"go/token"
 	"go/types"
 	"regexp"
 	"strings"
@@ -214,10 +213,6 @@ func (v *Visitor) resolveExpr(x *ast.Ident) ast.Expr {
 		}
 	}
 	return x
-}
-
-func (v *Visitor) position(p ast.Node) token.Position {
-	return v.entrypoint.Fset.Position(p.Pos())
 }
 
 var inferPathRegexp = regexp.MustCompilePOSIX(`\/[*:][^\/]+`)
