@@ -135,21 +135,18 @@ func (v *Visitor) walk(file *ast.File) {
 					if len(callexpr.Args) > 1 {
 						if m, ok := v.foldConstant(callexpr.Args[0]); ok {
 							if arg1, ok := v.foldConstant(callexpr.Args[1]); ok {
-								if p, pp := inferPath(arg1); len(p) > 0 {
-									parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
-								}
+								p, pp := inferPath(arg1)
+								parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
 							}
 						}
 					}
 
 				case "POST", "GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS":
 					if len(callexpr.Args) > 0 {
-						if m := selector.Sel.Name; len(m) > 0 {
-							if arg0, ok := v.foldConstant(callexpr.Args[0]); ok {
-								if p, pp := inferPath(arg0); len(p) > 0 {
-									parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
-								}
-							}
+						m := selector.Sel.Name
+						if arg0, ok := v.foldConstant(callexpr.Args[0]); ok {
+							p, pp := inferPath(arg0)
+							parent.endpoints = append(parent.endpoints, &Endpoint{Method: m, Path: p, PathParams: pp})
 						}
 					}
 				}
@@ -192,7 +189,6 @@ func (v *Visitor) resolveFunctionDeclaration(callexpr *ast.CallExpr) *ast.FuncDe
 			}
 		}
 	}
-
 	return nil
 }
 
