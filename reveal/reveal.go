@@ -1,9 +1,5 @@
 package reveal
 
-// TODO: support in/out headers
-// TODO: support in/out json body
-// TODO: support in query parameters
-
 import (
 	"context"
 	"fmt"

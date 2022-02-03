@@ -214,12 +214,11 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 						switch selectorexpr.Sel.Name {
 						case "Query":
 							if len(callexpr.Args) > 0 {
-								if query, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
 									out = append(out, &openapi3.ParameterRef{
 										Value: &openapi3.Parameter{
-											In:       openapi3.ParameterInQuery,
-											Name:     query,
-											Required: true,
+											In:   openapi3.ParameterInQuery,
+											Name: name,
 											Schema: &openapi3.SchemaRef{
 												Value: &openapi3.Schema{
 													Type: openapi3.TypeString,
@@ -232,13 +231,12 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 
 						case "DefaultQuery":
 							if len(callexpr.Args) > 1 {
-								if query, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
 									if defaultValue, ok := v.foldConstant(callexpr.Args[1], pkg); ok {
 										out = append(out, &openapi3.ParameterRef{
 											Value: &openapi3.Parameter{
-												In:       openapi3.ParameterInQuery,
-												Name:     query,
-												Required: false,
+												In:   openapi3.ParameterInQuery,
+												Name: name,
 												Schema: &openapi3.SchemaRef{
 													Value: &openapi3.Schema{
 														Type:    openapi3.TypeString,
@@ -254,7 +252,31 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 						case "ShouldBindQuery", "BindQuery":
 							if len(callexpr.Args) > 0 {
 								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
-								params := paramsFromStructFields(arg0, "form")
+								params := paramsFromStructFields(arg0, "form", openapi3.ParameterInQuery)
+								out = append(out, params...)
+							}
+
+						case "GetHeader":
+							if len(callexpr.Args) > 0 {
+								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+									out = append(out, &openapi3.ParameterRef{
+										Value: &openapi3.Parameter{
+											In:   openapi3.ParameterInHeader,
+											Name: name,
+											Schema: &openapi3.SchemaRef{
+												Value: &openapi3.Schema{
+													Type: openapi3.TypeString,
+												},
+											},
+										},
+									})
+								}
+							}
+
+						case "ShouldBindHeader", "BindHeader":
+							if len(callexpr.Args) > 0 {
+								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
+								params := paramsFromStructFields(arg0, "header", openapi3.ParameterInHeader)
 								out = append(out, params...)
 							}
 
@@ -374,7 +396,7 @@ func isGinContext(ty types.Type) bool {
 	return ty != nil && ty.String() == "*github.com/gin-gonic/gin.Context"
 }
 
-func paramsFromStructFields(ty types.Type, tag string) openapi3.Parameters {
+func paramsFromStructFields(ty types.Type, tag string, in string) openapi3.Parameters {
 	var out openapi3.Parameters
 
 	if ty == nil {
@@ -404,7 +426,7 @@ func paramsFromStructFields(ty types.Type, tag string) openapi3.Parameters {
 						if value, err := tags.Get(tag); err == nil {
 							out = append(out, &openapi3.ParameterRef{
 								Value: &openapi3.Parameter{
-									In:       openapi3.ParameterInQuery,
+									In:       in,
 									Name:     value.Name,
 									Required: false,
 									Schema: &openapi3.SchemaRef{
