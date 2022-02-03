@@ -28,11 +28,12 @@ func NewVisitor(pkgs []*packages.Package) *Visitor {
 		exprsByIdent: map[ast.Object]ast.Expr{},
 	}
 
+	// entrypoint is always the last package
+	v.entrypoint = pkgs[len(pkgs)-1]
+
+	// indexing packages by id
 	for _, pkg := range pkgs {
 		v.pkgsByID[pkg.ID] = pkg
-		if v.entrypoint == nil || len(pkg.ID) < len(v.entrypoint.ID) {
-			v.entrypoint = pkg
-		}
 	}
 
 	return v
