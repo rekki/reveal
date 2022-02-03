@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/fatih/structtag"
 	"github.com/getkin/kin-openapi/openapi3"
 	"golang.org/x/tools/go/packages"
 )
@@ -249,8 +250,15 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 									}
 								}
 							}
-						}
 
+						case "ShouldBindQuery", "BindQuery":
+							if len(callexpr.Args) > 0 {
+								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
+								params := paramsFromStructFields(arg0, "form")
+								out = append(out, params...)
+							}
+
+						}
 					}
 				}
 				return false
@@ -364,6 +372,56 @@ func resolveGinKind(ty types.Type) GinKind {
 
 func isGinContext(ty types.Type) bool {
 	return ty != nil && ty.String() == "*github.com/gin-gonic/gin.Context"
+}
+
+func paramsFromStructFields(ty types.Type, tag string) openapi3.Parameters {
+	var out openapi3.Parameters
+
+	if ty == nil {
+		return out
+	}
+
+	for {
+		if ptr, ok := ty.(*types.Pointer); ok {
+			ty = ptr.Elem()
+		} else if named, ok := ty.(*types.Named); ok {
+			ty = named.Underlying()
+		} else {
+			break
+		}
+	}
+
+	if strct, ok := ty.(*types.Struct); ok {
+		for i, max := 0, strct.NumFields(); i < max; i++ {
+			if f := strct.Field(i); f.Exported() {
+				tags, err := structtag.Parse(strct.Tag(i))
+				if err != nil {
+					continue
+				}
+
+				for _, key := range tags.Keys() {
+					if key == tag {
+						if value, err := tags.Get(tag); err == nil {
+							out = append(out, &openapi3.ParameterRef{
+								Value: &openapi3.Parameter{
+									In:       openapi3.ParameterInQuery,
+									Name:     value.Name,
+									Required: false,
+									Schema: &openapi3.SchemaRef{
+										Value: &openapi3.Schema{
+											Type: openapi3.TypeString,
+										},
+									},
+								},
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return out
 }
 
 type Group struct {
