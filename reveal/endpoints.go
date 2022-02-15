@@ -285,7 +285,6 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 							if len(callexpr.Args) > 0 {
 								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
 								requestSchema := schemaFromType(arg0, "json")
-
 								if requestBody == nil {
 									requestBody = &openapi3.RequestBodyRef{
 										Value: &openapi3.RequestBody{
@@ -317,9 +316,11 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 	}
 
 	// for each content, flatten if there is only one possible type
-	for _, content := range requestBody.Value.Content {
-		if len(content.Schema.Value.OneOf) == 1 {
-			content.Schema = content.Schema.Value.OneOf[0]
+	if requestBody != nil && requestBody.Value != nil && requestBody.Value.Content != nil {
+		for _, content := range requestBody.Value.Content {
+			if content != nil && content.Schema != nil && content.Schema.Value != nil && len(content.Schema.Value.OneOf) == 1 {
+				content.Schema = content.Schema.Value.OneOf[0]
+			}
 		}
 	}
 

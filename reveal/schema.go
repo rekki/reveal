@@ -29,7 +29,33 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 		default:
 			panic(fmt.Errorf("unsupported basic type %#v", t))
 		}
-		return &openapi3.SchemaRef{Value: value}
+		return &openapi3.SchemaRef{
+			Value: value,
+		}
+
+	case *types.Interface:
+		return &openapi3.SchemaRef{
+			Value: &openapi3.Schema{
+				Type:        openapi3.TypeObject,
+				Description: fmt.Sprintf("%v", ty),
+			},
+		}
+
+	case *types.Map:
+		return &openapi3.SchemaRef{
+			Value: &openapi3.Schema{
+				Type: openapi3.TypeObject,
+				AdditionalProperties: &openapi3.SchemaRef{
+					Value: &openapi3.Schema{
+						Type: openapi3.TypeObject,
+						Properties: openapi3.Schemas{
+							"code": schemaFromType(t.Key(), tag),
+							"type": schemaFromType(t.Elem(), tag),
+						},
+					},
+				},
+			},
+		}
 
 	case *types.Slice:
 		return &openapi3.SchemaRef{

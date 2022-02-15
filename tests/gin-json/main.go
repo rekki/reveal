@@ -91,12 +91,14 @@ func main() {
 			Float32 float32
 			Float64 float64
 
-			//Complex64  complex64
-			//Complex128 complex128
-
 			Array []string
 
+			Map map[string]bool
+
 			Struct struct{}
+
+			//Complex64  complex64
+			//Complex128 complex128
 		}
 		_ = c.ShouldBindJSON(&jsonA)
 	})
