@@ -11,7 +11,7 @@ codebases that aims at extracting valuable information before runtime.
 ## Development
 
 ```
-go run . <path> > /tmp/openapi.yaml
+go run . ./tests/gin-json | tee /tmp/openapi.yaml
 redoc-cli serve -w /tmp/openapi.yaml # npm i -g redoc-cli
 ```
 
