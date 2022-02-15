@@ -284,7 +284,26 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 						case "ShouldBindJSON", "BindJSON":
 							if len(callexpr.Args) > 0 {
 								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
-								requestBody = requestBodyFromStructFields(arg0, "json", "application/json")
+								requestSchema := schemaFromType(arg0, "json")
+
+								if requestBody == nil {
+									requestBody = &openapi3.RequestBodyRef{
+										Value: &openapi3.RequestBody{
+											Content: map[string]*openapi3.MediaType{
+												"application/json": {
+													Schema: &openapi3.SchemaRef{
+														Value: &openapi3.Schema{
+															OneOf: []*openapi3.SchemaRef{requestSchema},
+														},
+													},
+												},
+											},
+										},
+									}
+								} else {
+									v := requestBody.Value.Content.Get("application/json").Schema.Value
+									v.OneOf = append(v.OneOf, requestSchema)
+								}
 							}
 
 						}
@@ -295,6 +314,12 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 
 			return true
 		})
+	}
+
+	// flatten if there is only one possible type
+	content := requestBody.Value.Content.Get("application/json")
+	if len(content.Schema.Value.OneOf) == 1 {
+		content.Schema = content.Schema.Value.OneOf[0]
 	}
 
 	return requestBody, params
@@ -401,18 +426,6 @@ func resolveGinKind(ty types.Type) GinKind {
 
 func isGinContext(ty types.Type) bool {
 	return ty != nil && ty.String() == "*github.com/gin-gonic/gin.Context"
-}
-
-func requestBodyFromStructFields(ty types.Type, tag, contentType string) *openapi3.RequestBodyRef {
-	return &openapi3.RequestBodyRef{
-		Value: &openapi3.RequestBody{
-			Content: map[string]*openapi3.MediaType{
-				contentType: {
-					Schema: schemaFromType(ty, tag),
-				},
-			},
-		},
-	}
 }
 
 func paramsFromStructFields(ty types.Type, tag string, in string) openapi3.Parameters {
