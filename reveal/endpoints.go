@@ -316,10 +316,11 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 		})
 	}
 
-	// flatten if there is only one possible type
-	content := requestBody.Value.Content.Get("application/json")
-	if len(content.Schema.Value.OneOf) == 1 {
-		content.Schema = content.Schema.Value.OneOf[0]
+	// for each content, flatten if there is only one possible type
+	for _, content := range requestBody.Value.Content {
+		if len(content.Schema.Value.OneOf) == 1 {
+			content.Schema = content.Schema.Value.OneOf[0]
+		}
 	}
 
 	return requestBody, params
