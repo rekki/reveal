@@ -253,8 +253,8 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 						case "ShouldBindQuery", "BindQuery":
 							if len(callexpr.Args) > 0 {
 								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
-								params := paramsFromStructFields(arg0, "form", openapi3.ParameterInQuery)
-								params = append(params, params...)
+								p := paramsFromStructFields(arg0, "form", openapi3.ParameterInQuery)
+								params = append(params, p...)
 							}
 
 						case "GetHeader":
@@ -277,8 +277,8 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 						case "ShouldBindHeader", "BindHeader":
 							if len(callexpr.Args) > 0 {
 								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
-								params := paramsFromStructFields(arg0, "header", openapi3.ParameterInHeader)
-								params = append(params, params...)
+								p := paramsFromStructFields(arg0, "header", openapi3.ParameterInHeader)
+								params = append(params, p...)
 							}
 
 						case "ShouldBindJSON", "BindJSON":
