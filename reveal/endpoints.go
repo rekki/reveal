@@ -62,7 +62,7 @@ func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 					if i >= len(assignstmt.Rhs) {
 						break
 					}
-					if ident, ok := lhs.(*ast.Ident); ok {
+					if ident, ok := lhs.(*ast.Ident); ok && ident.Obj != nil {
 						v.exprsByIdent[*ident.Obj] = assignstmt.Rhs[i]
 					}
 				}
