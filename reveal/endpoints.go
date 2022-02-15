@@ -189,8 +189,20 @@ func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 }
 
 func (v *EndpointsVisitor) foldConstant(expr ast.Expr, pkg *packages.Package) (string, bool) {
+	if expr == nil {
+		return "", false
+	}
+
 	ty, ok := pkg.TypesInfo.Types[expr]
 	if !ok {
+		return "", false
+	}
+
+	if ty.Value == nil {
+		return "", false
+	}
+
+	if basic, ok := ty.Type.(*types.Basic); !ok || basic.Kind() != types.String {
 		return "", false
 	}
 
