@@ -46,6 +46,7 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 				Properties: openapi3.Schemas{},
 			},
 		}
+
 		for i := 0; i < t.NumFields(); i++ {
 			field := t.Field(i)
 
@@ -73,6 +74,7 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 				out.Value.Properties[property] = schemaFromType(field.Type(), tag)
 			}
 		}
+
 		return out
 	}
 
