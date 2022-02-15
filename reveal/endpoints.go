@@ -30,7 +30,9 @@ func NewEndpointsVisitor(pkgs []*packages.Package) *EndpointsVisitor {
 	}
 
 	// entrypoint is always the last package
-	v.entrypoint = pkgs[len(pkgs)-1]
+	if l := len(pkgs); l > 0 {
+		v.entrypoint = pkgs[l-1]
+	}
 
 	// indexing packages by id
 	for _, pkg := range pkgs {
