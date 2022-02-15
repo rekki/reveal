@@ -68,7 +68,7 @@ func main() {
 	}
 
 	// it should support all go types
-	router.GET("/json5", func(c *gin.Context) {
+	router.GET("/json6", func(c *gin.Context) {
 		var jsonA struct {
 			Bool bool
 

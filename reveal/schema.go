@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/types"
 
+	"github.com/fatih/structtag"
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
@@ -47,11 +48,30 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 		}
 		for i := 0; i < t.NumFields(); i++ {
 			field := t.Field(i)
+
 			// ignore private fields
 			if !field.Exported() {
 				continue
 			}
-			out.Value.Properties[field.Name()] = schemaFromType(field.Type(), tag)
+
+			tags, err := structtag.Parse(t.Tag(i))
+			if err != nil {
+				continue
+			}
+
+			property := field.Name()
+			for _, key := range tags.Keys() {
+				if key == tag {
+					if value, err := tags.Get(tag); err == nil {
+						property = value.Name
+						break
+					}
+				}
+			}
+
+			if property != "-" {
+				out.Value.Properties[property] = schemaFromType(field.Type(), tag)
+			}
 		}
 		return out
 	}
