@@ -153,9 +153,9 @@ func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 						if m, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
 							if arg1, ok := v.foldConstant(callexpr.Args[1], pkg); ok {
 								path, pathParams := inferPath(arg1)
-								handlerParams := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
+								reqBody, handlerParams := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
 
-								endpoint := &Endpoint{Method: m, Path: path}
+								endpoint := &Endpoint{Method: m, Path: path, RequestBody: reqBody}
 								endpoint.Params = append(endpoint.Params, pathParams...)
 								endpoint.Params = append(endpoint.Params, handlerParams...)
 
@@ -169,9 +169,9 @@ func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 						m := selector.Sel.Name
 						if arg0, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
 							path, pathParams := inferPath(arg0)
-							handlerParams := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
+							reqBody, handlerParams := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
 
-							endpoint := &Endpoint{Method: m, Path: path}
+							endpoint := &Endpoint{Method: m, Path: path, RequestBody: reqBody}
 							endpoint.Params = append(endpoint.Params, pathParams...)
 							endpoint.Params = append(endpoint.Params, handlerParams...)
 
@@ -202,8 +202,9 @@ func (v *EndpointsVisitor) foldConstant(expr ast.Expr, pkg *packages.Package) (s
 	return folded, true
 }
 
-func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) openapi3.Parameters {
-	var out openapi3.Parameters
+func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*openapi3.RequestBodyRef, openapi3.Parameters) {
+	var requestBody *openapi3.RequestBodyRef
+	var params openapi3.Parameters
 
 	if lit, ok := expr.(*ast.FuncLit); ok {
 		ast.Inspect(lit, func(n ast.Node) bool {
@@ -215,7 +216,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 						case "Query":
 							if len(callexpr.Args) > 0 {
 								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
-									out = append(out, &openapi3.ParameterRef{
+									params = append(params, &openapi3.ParameterRef{
 										Value: &openapi3.Parameter{
 											In:   openapi3.ParameterInQuery,
 											Name: name,
@@ -233,7 +234,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 							if len(callexpr.Args) > 1 {
 								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
 									if defaultValue, ok := v.foldConstant(callexpr.Args[1], pkg); ok {
-										out = append(out, &openapi3.ParameterRef{
+										params = append(params, &openapi3.ParameterRef{
 											Value: &openapi3.Parameter{
 												In:   openapi3.ParameterInQuery,
 												Name: name,
@@ -253,13 +254,13 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 							if len(callexpr.Args) > 0 {
 								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
 								params := paramsFromStructFields(arg0, "form", openapi3.ParameterInQuery)
-								out = append(out, params...)
+								params = append(params, params...)
 							}
 
 						case "GetHeader":
 							if len(callexpr.Args) > 0 {
 								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
-									out = append(out, &openapi3.ParameterRef{
+									params = append(params, &openapi3.ParameterRef{
 										Value: &openapi3.Parameter{
 											In:   openapi3.ParameterInHeader,
 											Name: name,
@@ -277,7 +278,13 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 							if len(callexpr.Args) > 0 {
 								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
 								params := paramsFromStructFields(arg0, "header", openapi3.ParameterInHeader)
-								out = append(out, params...)
+								params = append(params, params...)
+							}
+
+						case "ShouldBindJSON", "BindJSON":
+							if len(callexpr.Args) > 0 {
+								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
+								requestBody = requestBodyFromStructFields(arg0, "json", "application/json")
 							}
 
 						}
@@ -290,7 +297,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) op
 		})
 	}
 
-	return out
+	return requestBody, params
 }
 
 func (v *EndpointsVisitor) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *packages.Package) (*ast.FuncDecl, *packages.Package) {
@@ -396,6 +403,18 @@ func isGinContext(ty types.Type) bool {
 	return ty != nil && ty.String() == "*github.com/gin-gonic/gin.Context"
 }
 
+func requestBodyFromStructFields(ty types.Type, tag, contentType string) *openapi3.RequestBodyRef {
+	return &openapi3.RequestBodyRef{
+		Value: &openapi3.RequestBody{
+			Content: map[string]*openapi3.MediaType{
+				contentType: {
+					Schema: schemaFromType(ty, tag),
+				},
+			},
+		},
+	}
+}
+
 func paramsFromStructFields(ty types.Type, tag string, in string) openapi3.Parameters {
 	var out openapi3.Parameters
 
@@ -470,6 +489,7 @@ func (g *Group) all() []*Endpoint {
 type Endpoint struct {
 	Path        string
 	Params      openapi3.Parameters
+	RequestBody *openapi3.RequestBodyRef
 	Method      string
 	Description string
 }
