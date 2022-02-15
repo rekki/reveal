@@ -44,16 +44,8 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 	case *types.Map:
 		return &openapi3.SchemaRef{
 			Value: &openapi3.Schema{
-				Type: openapi3.TypeObject,
-				AdditionalProperties: &openapi3.SchemaRef{
-					Value: &openapi3.Schema{
-						Type: openapi3.TypeObject,
-						Properties: openapi3.Schemas{
-							"code": schemaFromType(t.Key(), tag),
-							"type": schemaFromType(t.Elem(), tag),
-						},
-					},
-				},
+				Type:                 openapi3.TypeObject,
+				AdditionalProperties: schemaFromType(t.Elem(), tag),
 			},
 		}
 
