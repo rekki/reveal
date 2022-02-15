@@ -506,7 +506,7 @@ func (g *Group) all() []*Endpoint {
 
 	for _, group := range g.groups {
 		for _, endpoint := range group.all() {
-			endpoint.Path = group.Path + endpoint.Path
+			endpoint.Path = "/" + strings.TrimLeft(group.Path+endpoint.Path, "/")
 			endpoint.Params = append(endpoint.Params, group.Params...)
 			out = append(out, endpoint)
 		}
