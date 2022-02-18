@@ -12,25 +12,21 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 	switch t := flattenType(ty).(type) {
 
 	case *types.Basic: // https://swagger.io/specification/#data-types
-		var value *openapi3.Schema
 		switch t.Name() {
 		case "bool":
-			value = openapi3.NewBoolSchema()
+			return &openapi3.SchemaRef{Value: openapi3.NewBoolSchema()}
 		case "int", "int8", "int16", "intptr", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "rune", "byte":
-			value = openapi3.NewIntegerSchema()
+			return &openapi3.SchemaRef{Value: openapi3.NewIntegerSchema()}
 		case "int32":
-			value = openapi3.NewInt32Schema()
+			return &openapi3.SchemaRef{Value: openapi3.NewInt32Schema()}
 		case "int64":
-			value = openapi3.NewInt64Schema()
+			return &openapi3.SchemaRef{Value: openapi3.NewInt64Schema()}
 		case "float32", "float64":
-			value = openapi3.NewFloat64Schema()
+			return &openapi3.SchemaRef{Value: openapi3.NewFloat64Schema()}
 		case "string":
-			value = openapi3.NewStringSchema()
+			return &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}
 		default:
-			panic(fmt.Errorf("unsupported basic type %#v", t))
-		}
-		return &openapi3.SchemaRef{
-			Value: value,
+			return nil
 		}
 
 	case *types.Interface:

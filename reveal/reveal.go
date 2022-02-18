@@ -111,19 +111,11 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			doc.Paths[e.Path] = item
 		}
 
-		d200 := "source ..."
-
 		operation := &openapi3.Operation{
 			Description: e.Description,
 			Parameters:  e.Params,
 			RequestBody: e.RequestBody,
-			Responses: openapi3.Responses{
-				"200": &openapi3.ResponseRef{
-					Value: &openapi3.Response{
-						Description: &d200,
-					},
-				},
-			},
+			Responses:   e.Responses,
 		}
 
 		switch e.Method {

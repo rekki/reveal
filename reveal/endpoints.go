@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/types"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/fatih/structtag"
@@ -142,7 +143,7 @@ func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 				switch selector.Sel.Name {
 				case "Group":
 					if len(callexpr.Args) >= 1 {
-						if arg0, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+						if arg0, ok := v.foldStringConstant(callexpr.Args[0], pkg); ok {
 							path, pathParams := inferPath(arg0)
 							g := &Group{Path: path, Params: pathParams}
 							v.groupsByExpr[callexpr] = g
@@ -152,12 +153,17 @@ func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 
 				case "Handle":
 					if len(callexpr.Args) > 2 {
-						if m, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
-							if arg1, ok := v.foldConstant(callexpr.Args[1], pkg); ok {
+						if m, ok := v.foldStringConstant(callexpr.Args[0], pkg); ok {
+							if arg1, ok := v.foldStringConstant(callexpr.Args[1], pkg); ok {
 								path, pathParams := inferPath(arg1)
-								reqBody, handlerParams := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
+								reqBody, handlerParams, res := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
 
-								endpoint := &Endpoint{Method: m, Path: path, RequestBody: reqBody}
+								endpoint := &Endpoint{
+									Method:      m,
+									Path:        path,
+									RequestBody: reqBody,
+									Responses:   res,
+								}
 								endpoint.Params = append(endpoint.Params, pathParams...)
 								endpoint.Params = append(endpoint.Params, handlerParams...)
 
@@ -169,11 +175,16 @@ func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 				case "POST", "GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS":
 					if len(callexpr.Args) >= 2 {
 						m := selector.Sel.Name
-						if arg0, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+						if arg0, ok := v.foldStringConstant(callexpr.Args[0], pkg); ok {
 							path, pathParams := inferPath(arg0)
-							reqBody, handlerParams := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
+							reqBody, handlerParams, res := v.inferHandler(callexpr.Args[len(callexpr.Args)-1], pkg)
 
-							endpoint := &Endpoint{Method: m, Path: path, RequestBody: reqBody}
+							endpoint := &Endpoint{
+								Method:      m,
+								Path:        path,
+								RequestBody: reqBody,
+								Responses:   res,
+							}
 							endpoint.Params = append(endpoint.Params, pathParams...)
 							endpoint.Params = append(endpoint.Params, handlerParams...)
 
@@ -190,7 +201,29 @@ func (v *EndpointsVisitor) walk(node ast.Node, pkg *packages.Package) {
 	})
 }
 
-func (v *EndpointsVisitor) foldConstant(expr ast.Expr, pkg *packages.Package) (string, bool) {
+func (v *EndpointsVisitor) foldIntConstant(expr ast.Expr, pkg *packages.Package) (int, bool) {
+	if expr == nil {
+		return 0, false
+	}
+
+	ty, ok := pkg.TypesInfo.Types[expr]
+	if !ok {
+		return 0, false
+	}
+
+	if ty.Value == nil {
+		return 0, false
+	}
+
+	folded, ok := constant.Int64Val(ty.Value)
+	if !ok {
+		return 0, false
+	}
+
+	return int(folded), true
+}
+
+func (v *EndpointsVisitor) foldStringConstant(expr ast.Expr, pkg *packages.Package) (string, bool) {
 	if expr == nil {
 		return "", false
 	}
@@ -216,9 +249,10 @@ func (v *EndpointsVisitor) foldConstant(expr ast.Expr, pkg *packages.Package) (s
 	return folded, true
 }
 
-func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*openapi3.RequestBodyRef, openapi3.Parameters) {
+func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*openapi3.RequestBodyRef, openapi3.Parameters, openapi3.Responses) {
 	var requestBody *openapi3.RequestBodyRef
 	var params openapi3.Parameters
+	responses := openapi3.Responses{}
 
 	if lit, ok := expr.(*ast.FuncLit); ok {
 		ast.Inspect(lit, func(n ast.Node) bool {
@@ -229,7 +263,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 						switch selectorexpr.Sel.Name {
 						case "Query":
 							if len(callexpr.Args) > 0 {
-								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+								if name, ok := v.foldStringConstant(callexpr.Args[0], pkg); ok {
 									params = append(params, &openapi3.ParameterRef{
 										Value: &openapi3.Parameter{
 											In:   openapi3.ParameterInQuery,
@@ -246,8 +280,8 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 
 						case "DefaultQuery":
 							if len(callexpr.Args) > 1 {
-								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
-									if defaultValue, ok := v.foldConstant(callexpr.Args[1], pkg); ok {
+								if name, ok := v.foldStringConstant(callexpr.Args[0], pkg); ok {
+									if defaultValue, ok := v.foldStringConstant(callexpr.Args[1], pkg); ok {
 										params = append(params, &openapi3.ParameterRef{
 											Value: &openapi3.Parameter{
 												In:   openapi3.ParameterInQuery,
@@ -273,7 +307,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 
 						case "GetHeader":
 							if len(callexpr.Args) > 0 {
-								if name, ok := v.foldConstant(callexpr.Args[0], pkg); ok {
+								if name, ok := v.foldStringConstant(callexpr.Args[0], pkg); ok {
 									params = append(params, &openapi3.ParameterRef{
 										Value: &openapi3.Parameter{
 											In:   openapi3.ParameterInHeader,
@@ -319,6 +353,151 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 								}
 							}
 
+						case "AbortWithError", "AbortWithStatus":
+							if len(callexpr.Args) > 0 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									d := "description"
+									responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+										Value: &openapi3.Response{
+											Description: &d,
+										},
+									}
+								}
+							}
+
+						case "AbortWithStatusJSON", "AsciiJSON", "IndentedJSON", "JSON", "PureJSON", "SecureJSON":
+							if len(callexpr.Args) > 1 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									arg1 := pkg.TypesInfo.Types[callexpr.Args[1]].Type
+									d := "description"
+									responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+										Value: &openapi3.Response{
+											Description: &d,
+											Content: openapi3.Content{
+												"application/json": &openapi3.MediaType{
+													Schema: schemaFromType(arg1, "json"),
+												},
+											},
+										},
+									}
+								}
+							}
+
+						case "Data":
+							if len(callexpr.Args) > 1 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									if contentType, ok := v.foldStringConstant(callexpr.Args[1], pkg); ok {
+										d := "description"
+										responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+											Value: &openapi3.Response{
+												Description: &d,
+												Content: openapi3.Content{
+													contentType: &openapi3.MediaType{},
+												},
+											},
+										}
+									}
+								}
+							}
+
+						case "DataFromReader":
+							if len(callexpr.Args) > 2 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									if contentType, ok := v.foldStringConstant(callexpr.Args[2], pkg); ok {
+										d := "description"
+										responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+											Value: &openapi3.Response{
+												Description: &d,
+												Content: openapi3.Content{
+													contentType: &openapi3.MediaType{},
+												},
+											},
+										}
+									}
+								}
+							}
+
+						case "HTML", "Render":
+							if len(callexpr.Args) > 0 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									d := "description"
+									responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+										Value: &openapi3.Response{
+											Description: &d,
+											Content: openapi3.Content{
+												"text/html": &openapi3.MediaType{},
+											},
+										},
+									}
+								}
+							}
+
+						case "JSONP":
+							if len(callexpr.Args) > 1 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									arg1 := pkg.TypesInfo.Types[callexpr.Args[1]].Type
+									d := "description"
+									responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+										Value: &openapi3.Response{
+											Description: &d,
+											Content: openapi3.Content{
+												"application/javascript": &openapi3.MediaType{
+													Schema: schemaFromType(arg1, "json"),
+												},
+											},
+										},
+									}
+								}
+							}
+
+						case "Redirect", "Status", "String":
+							if len(callexpr.Args) > 0 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									d := "description"
+									responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+										Value: &openapi3.Response{
+											Description: &d,
+										},
+									}
+								}
+							}
+
+						case "XML":
+							if len(callexpr.Args) > 1 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									arg1 := pkg.TypesInfo.Types[callexpr.Args[1]].Type
+									d := "description"
+									responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+										Value: &openapi3.Response{
+											Description: &d,
+											Content: openapi3.Content{
+												"text/xml": &openapi3.MediaType{
+													Schema: schemaFromType(arg1, "xml"),
+												},
+											},
+										},
+									}
+								}
+							}
+
+						case "YAML":
+							if len(callexpr.Args) > 1 {
+								if status, ok := v.foldIntConstant(callexpr.Args[0], pkg); ok {
+									arg1 := pkg.TypesInfo.Types[callexpr.Args[1]].Type
+									d := "description"
+									responses[strconv.Itoa(status)] = &openapi3.ResponseRef{
+										Value: &openapi3.Response{
+											Description: &d,
+											Content: openapi3.Content{
+												"text/yaml": &openapi3.MediaType{
+													Schema: schemaFromType(arg1, "yaml"),
+												},
+											},
+										},
+									}
+								}
+							}
+
 						}
 					}
 				}
@@ -338,7 +517,11 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 		}
 	}
 
-	return requestBody, params
+	if len(responses) == 0 {
+		responses = openapi3.NewResponses()
+	}
+
+	return requestBody, params, responses
 }
 
 func (v *EndpointsVisitor) resolveFunctionDeclaration(callexpr *ast.CallExpr, pkg *packages.Package) (*ast.FuncDecl, *packages.Package) {
@@ -485,6 +668,7 @@ func paramsFromStructFields(ty types.Type, tag string, in string) openapi3.Param
 								},
 							})
 						}
+						continue
 					}
 				}
 			}
@@ -519,6 +703,7 @@ type Endpoint struct {
 	Path        string
 	Params      openapi3.Parameters
 	RequestBody *openapi3.RequestBodyRef
+	Responses   openapi3.Responses
 	Method      string
 	Description string
 }
