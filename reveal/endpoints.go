@@ -15,6 +15,7 @@ import (
 
 type EndpointsVisitor struct {
 	root         *Group            // root group
+	schemas      *SchemaRegistry   // hoisted schemas
 	entrypoint   *packages.Package // root package
 	pkgsByID     map[string]*packages.Package
 	groupsByExpr map[ast.Expr]*Group
@@ -24,6 +25,7 @@ type EndpointsVisitor struct {
 func NewEndpointsVisitor(pkgs []*packages.Package) *EndpointsVisitor {
 	v := &EndpointsVisitor{
 		root:         &Group{},
+		schemas:      NewSchemaRegistry(),
 		entrypoint:   nil,
 		pkgsByID:     map[string]*packages.Package{},
 		groupsByExpr: map[ast.Expr]*Group{},
@@ -332,7 +334,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 						case "ShouldBindJSON", "BindJSON":
 							if len(callexpr.Args) > 0 {
 								arg0 := pkg.TypesInfo.Types[callexpr.Args[0]].Type
-								requestSchema := schemaFromType(arg0, "json")
+								requestSchema := v.schemas.ToSchemaRef(arg0, "json")
 								if requestBody == nil {
 									requestBody = &openapi3.RequestBodyRef{
 										Value: &openapi3.RequestBody{
@@ -375,7 +377,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 											Description: &d,
 											Content: openapi3.Content{
 												"application/json": &openapi3.MediaType{
-													Schema: schemaFromType(arg1, "json"),
+													Schema: v.schemas.ToSchemaRef(arg1, "json"),
 												},
 											},
 										},
@@ -442,7 +444,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 											Description: &d,
 											Content: openapi3.Content{
 												"application/javascript": &openapi3.MediaType{
-													Schema: schemaFromType(arg1, "json"),
+													Schema: v.schemas.ToSchemaRef(arg1, "json"),
 												},
 											},
 										},
@@ -472,7 +474,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 											Description: &d,
 											Content: openapi3.Content{
 												"text/xml": &openapi3.MediaType{
-													Schema: schemaFromType(arg1, "xml"),
+													Schema: v.schemas.ToSchemaRef(arg1, "xml"),
 												},
 											},
 										},
@@ -490,7 +492,7 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 											Description: &d,
 											Content: openapi3.Content{
 												"text/yaml": &openapi3.MediaType{
-													Schema: schemaFromType(arg1, "yaml"),
+													Schema: v.schemas.ToSchemaRef(arg1, "yaml"),
 												},
 											},
 										},

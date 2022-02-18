@@ -8,8 +8,29 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
-func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
-	switch t := flattenType(ty).(type) {
+type SchemaRegistry struct {
+	Schemas openapi3.Schemas
+}
+
+func NewSchemaRegistry() *SchemaRegistry {
+	return &SchemaRegistry{
+		Schemas: openapi3.Schemas{},
+	}
+}
+
+func (sr *SchemaRegistry) ToSchemaRef(ty types.Type, tag string) *openapi3.SchemaRef {
+	ty = flattenPointers(ty)
+
+	if named, ok := ty.(*types.Named); ok && named != nil {
+		name := named.Obj().Name()
+		if _, ok := sr.Schemas[name]; !ok {
+			sr.Schemas[name] = &openapi3.SchemaRef{}
+			sr.Schemas[name] = sr.ToSchemaRef(named.Underlying(), tag)
+		}
+		return &openapi3.SchemaRef{Ref: fmt.Sprintf("#/components/schemas/%s", name)}
+	}
+
+	switch t := ty.(type) {
 
 	case *types.Basic: // https://swagger.io/specification/#data-types
 		switch t.Name() {
@@ -41,7 +62,7 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 		return &openapi3.SchemaRef{
 			Value: &openapi3.Schema{
 				Type:                 openapi3.TypeObject,
-				AdditionalProperties: schemaFromType(t.Elem(), tag),
+				AdditionalProperties: sr.ToSchemaRef(t.Elem(), tag),
 			},
 		}
 
@@ -49,7 +70,7 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 		return &openapi3.SchemaRef{
 			Value: &openapi3.Schema{
 				Type:  openapi3.TypeArray,
-				Items: schemaFromType(t.Elem(), tag),
+				Items: sr.ToSchemaRef(t.Elem(), tag),
 			},
 		}
 
@@ -85,7 +106,7 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 			}
 
 			if property != "-" {
-				out.Value.Properties[property] = schemaFromType(field.Type(), tag)
+				out.Value.Properties[property] = sr.ToSchemaRef(field.Type(), tag)
 			}
 		}
 
@@ -95,12 +116,10 @@ func schemaFromType(ty types.Type, tag string) *openapi3.SchemaRef {
 	panic(fmt.Errorf("unsupported type %#v", ty))
 }
 
-func flattenType(ty types.Type) types.Type {
+func flattenPointers(ty types.Type) types.Type {
 	for {
 		if ptr, ok := ty.(*types.Pointer); ok && ptr != nil {
 			ty = ptr.Elem()
-		} else if named, ok := ty.(*types.Named); ok && named != nil {
-			ty = named.Underlying()
 		} else {
 			break
 		}
