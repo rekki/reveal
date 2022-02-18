@@ -11,7 +11,7 @@ func main() {
 	router := gin.Default()
 
 	router.GET("/responses", func(c *gin.Context) {
-		c.AbortWithError(400, fmt.Errorf("c.AbortWithError"))
+		_ = c.AbortWithError(400, fmt.Errorf("c.AbortWithError"))
 
 		c.AbortWithStatus(401)
 
