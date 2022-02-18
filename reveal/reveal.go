@@ -34,13 +34,13 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 		dir = path.Join(wd, dir)
 	}
 
-	dir = path.Clean(dir)
+	absDir := path.Clean(dir)
 
 	// Try to acquire git infos
 
 	var gitRoot, githubUserRepo, gitHash string
 
-	if repo, err := git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{
+	if repo, err := git.PlainOpenWithOptions(absDir, &git.PlainOpenOptions{
 		DetectDotGit: true,
 	}); err == nil {
 		if storage, ok := repo.Storer.(*filesystem.Storage); ok {
@@ -62,11 +62,13 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 
 	// Prepare the title/description
 
-	var title = dir
+	var title = path.Base(absDir)
 	var description string
 
 	if len(gitRoot) > 0 {
-		title = path.Clean("." + strings.TrimPrefix(title, gitRoot))
+		if t := path.Clean("." + strings.TrimPrefix(absDir, gitRoot)); t != "." {
+			title = t
+		}
 		if len(githubUserRepo) > 0 {
 			url := "https://github.com/" + githubUserRepo
 			if len(gitHash) > 0 {
@@ -74,13 +76,14 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			}
 			description = fmt.Sprintf("Source: [%s](%s)", url, url)
 		}
+	} else {
 	}
 
 	// Parse code and resolve types
 
 	pkgs, err := packages.Load(&packages.Config{
 		Context: ctx,
-		Dir:     dir,
+		Dir:     absDir,
 		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedExportsFile | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedTypesSizes | packages.NeedModule,
 	}, "./...")
 	if err != nil {
