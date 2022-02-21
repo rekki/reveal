@@ -52,25 +52,6 @@ func main() {
 		c.YAML(419, &struct{ J string }{J: "c.YAML"})
 	})
 
-	router.GET("/headers", func(c *gin.Context) {
-		// replace any existing header at key "A"
-		c.Header("A", "foo")
-
-		// delete any existing header at key "B"
-		c.Header("B", "__nope__")
-		c.Header("B", "")
-
-		// this should result in an empty header for "C"
-		c.Request.Header.Add("C", "__nope__")
-		c.Request.Header.Del("C")
-
-		// this should result in a 2-value header for "D"
-		c.Request.Header.Add("D", "__nope__")
-		c.Request.Header.Add("D", "__nope__")
-		c.Request.Header.Set("D", "foobar")
-		c.Request.Header.Add("D", "foobar")
-	})
-
 	if err := router.Run(":8080"); err != nil {
 		panic(err)
 	}

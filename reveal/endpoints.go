@@ -261,7 +261,6 @@ func (v *EndpointsVisitor) inferHandler(expr ast.Expr, pkg *packages.Package) (*
 			if callexpr, ok := n.(*ast.CallExpr); ok {
 				if selectorexpr, ok := callexpr.Fun.(*ast.SelectorExpr); ok {
 					if isGinContext(pkg.TypesInfo.Types[selectorexpr.X].Type) {
-
 						switch selectorexpr.Sel.Name {
 						case "Query":
 							if len(callexpr.Args) > 0 {

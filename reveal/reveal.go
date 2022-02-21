@@ -76,7 +76,6 @@ func Reveal(ctx context.Context, dir string) (*openapi3.T, error) {
 			}
 			description = fmt.Sprintf("Source: [%s](%s)", url, url)
 		}
-	} else {
 	}
 
 	// Parse code and resolve types
